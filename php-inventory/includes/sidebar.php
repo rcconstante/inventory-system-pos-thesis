@@ -15,25 +15,23 @@ $menuItems = match ($currentRoleId) {
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',        'icon' => $iconCategory],
         ['label' => 'PRODUCTS',  'href' => 'pages/products.php',        'icon' => $iconProducts],
         ['label' => 'USERS',     'href' => 'pages/users.php',           'icon' => $iconUsers],
-        ['label' => 'RECORDS',   'href' => 'pages/records.php',         'icon' => $iconRecords],
+        ['label' => 'REPORTS',   'href' => 'pages/records.php',         'icon' => $iconRecords],
     ],
     APP_ROLE_CASHIER => [
         ['label' => 'DASHBOARD', 'href' => 'pages/cashier_dashboard.php', 'icon' => $iconDashboard],
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',          'icon' => $iconCategory],
         ['label' => 'PRODUCTS',  'href' => 'pages/products.php',          'icon' => $iconProducts],
         ['label' => 'POS',       'href' => 'pages/pos.php',               'icon' => $iconPos],
-        ['label' => 'RECORDS',   'href' => 'pages/records.php',           'icon' => $iconRecords],
+        ['label' => 'REPORTS',   'href' => 'pages/records.php',           'icon' => $iconRecords],
     ],
     APP_ROLE_STAFF => [
-        ['label' => 'DASHBOARD', 'href' => 'pages/staff_dashboard.php', 'icon' => $iconDashboard],
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',        'icon' => $iconCategory],
         ['label' => 'PRODUCTS',  'href' => 'pages/products.php',        'icon' => $iconProducts],
-        ['label' => 'RECORDS',   'href' => 'pages/records.php',         'icon' => $iconRecords],
     ],
     default => [],
 };
 ?>
-<div class="w-[220px] h-screen custom-dark-bg text-white flex flex-col p-4 flex-shrink-0">
+<div class="w-[220px] h-screen custom-dark-bg text-white flex flex-col p-4 flex-shrink-0 transition-colors duration-200 dark:bg-gray-950">
     <!-- Logo -->
     <div class="mb-8 flex flex-col items-center">
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">

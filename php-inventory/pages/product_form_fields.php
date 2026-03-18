@@ -35,6 +35,10 @@ $formPrefix = $formPrefix ?? '';
         <label class="mb-1 block text-sm font-medium">Min Stock Level</label>
         <input type="number" min="0" id="<?php echo h($formPrefix . 'min_stock_level'); ?>" name="min_stock_level" required class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500">
     </div>
+    <div>
+        <label class="mb-1 block text-sm font-medium">Expiry Date (Optional)</label>
+        <input type="date" id="<?php echo h($formPrefix . 'expiry_date'); ?>" name="expiry_date" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500">
+    </div>
     <div class="md:col-span-2">
         <label class="mb-1 block text-sm font-medium">Compatibility</label>
         <input type="text" id="<?php echo h($formPrefix . 'compatibility'); ?>" name="compatibility" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500">

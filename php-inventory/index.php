@@ -50,12 +50,12 @@ $flashMessages = pull_flash_messages();
 
             <!-- Title -->
             <h1 class="text-white text-2xl font-bold text-center">
-                POINT OF SALE AND INVENTORY MANAGEMENT SYSTEM
+                INVENTORY MANAGEMENT AND POINT OF SALE SYSTEM
             </h1>
 
             <!-- Subtitle -->
-            <p class="text-white text-center mb-4">
-                Please select your role to continue
+            <p class="text-white text-center mb-4 text-lg">
+                Please enter log in to continue
             </p>
 
             <?php if ($flashMessages !== []): ?>
@@ -78,18 +78,10 @@ $flashMessages = pull_flash_messages();
             <?php endif; ?>
 
             <!-- Buttons -->
-            <div class="flex flex-col gap-4 w-full max-w-xs">
-                <a href="<?php echo h(app_url('login.php?role=admin')); ?>"
-                   class="bg-white text-black font-bold py-3 px-6 rounded-full border border-black hover:bg-gray-100 transition-colors text-lg text-center cursor-pointer">
-                    LOG IN AS ADMIN
-                </a>
-                <a href="<?php echo h(app_url('login.php?role=cashier')); ?>"
-                   class="bg-white text-black font-bold py-3 px-6 rounded-full border border-black hover:bg-gray-100 transition-colors text-lg text-center cursor-pointer">
-                    LOG IN AS CASHIER
-                </a>
-                <a href="<?php echo h(app_url('login.php?role=staff')); ?>"
-                   class="bg-white text-black font-bold py-3 px-6 rounded-full border border-black hover:bg-gray-100 transition-colors text-lg text-center cursor-pointer">
-                    LOG IN AS STAFF
+            <div class="flex flex-col gap-4 w-full max-w-xs mt-2">
+                <a href="<?php echo h(app_url('login.php')); ?>"
+                   class="bg-white text-black font-bold py-3 px-6 rounded-lg hover:bg-gray-100 transition-colors text-lg text-center cursor-pointer shadow-md">
+                    LOG IN
                 </a>
             </div>
 

@@ -13,14 +13,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf_or_fail('pages/users.php');
 
     try {
-        if (isset($_POST['add_user']) || isset($_POST['edit_user'])) {
-            $userId   = isset($_POST['edit_user']) ? (int) ($_POST['user_id'] ?? 0) : null;
+        if (isset($_POST['edit_user'])) {
+            $userId   = (int) ($_POST['user_id'] ?? 0);
             $fullName = trim((string) ($_POST['full_name'] ?? ''));
             $username = trim((string) ($_POST['username'] ?? ''));
             $email    = trim((string) ($_POST['email'] ?? ''));
             $roleId   = (int) ($_POST['role_id'] ?? 0);
             $password = (string) ($_POST['password'] ?? '');
-            $isActive = isset($_POST['edit_user']) ? (isset($_POST['is_active']) ? 1 : 0) : 1;
+            $isActive = isset($_POST['is_active']) ? 1 : 0;
 
             if ($fullName === '' || $username === '' || $email === '' || $roleId <= 0) {
                 throw new RuntimeException('Please complete all required user fields.');
@@ -30,97 +30,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Please enter a valid email address.');
             }
 
-            if ($userId === null) {
-                $duplicateStatement = $pdo->prepare(
-                    'SELECT user_id
-                     FROM User
-                     WHERE username = :username OR email = :email
-                     LIMIT 1'
-                );
-                $duplicateStatement->execute([
-                    'username' => $username,
-                    'email'    => $email,
-                ]);
-            } else {
-                $duplicateStatement = $pdo->prepare(
-                    'SELECT user_id
-                     FROM User
-                     WHERE (username = :username OR email = :email) AND user_id <> :user_id
-                     LIMIT 1'
-                );
-                $duplicateStatement->execute([
-                    'username' => $username,
-                    'email'    => $email,
-                    'user_id'  => $userId,
-                ]);
-            }
+            $duplicateStatement = $pdo->prepare(
+                'SELECT user_id
+                 FROM User
+                 WHERE (username = :username OR email = :email) AND user_id <> :user_id
+                 LIMIT 1'
+            );
+            $duplicateStatement->execute([
+                'username' => $username,
+                'email'    => $email,
+                'user_id'  => $userId,
+            ]);
 
             if ($duplicateStatement->fetch()) {
                 throw new RuntimeException('That username or email address is already assigned to another user.');
             }
 
-            if ($userId === null) {
-                if (strlen($password) < 8) {
-                    throw new RuntimeException('New user passwords must be at least 8 characters long.');
-                }
-
-                $insertStatement = $pdo->prepare(
-                    'INSERT INTO User (full_name, username, email, password, role_id)
-                     VALUES (:full_name, :username, :email, :password, :role_id)'
-                );
-                $insertStatement->execute([
-                    'full_name' => $fullName,
-                    'username'  => $username,
-                    'email'     => $email,
-                    'password'  => password_hash($password, PASSWORD_DEFAULT),
-                    'role_id'   => $roleId,
-                ]);
-
-                set_flash('success', 'User account created successfully.');
-            } else {
-                if ($userId === (int) current_user_id() && $roleId !== APP_ROLE_ADMIN) {
-                    throw new RuntimeException('You cannot remove your own admin access from this screen.');
-                }
-
-                $updateFields = [
-                    'full_name = :full_name',
-                    'username = :username',
-                    'email = :email',
-                    'role_id = :role_id',
-                    'is_active = :is_active',
-                ];
-                $parameters = [
-                    'full_name' => $fullName,
-                    'username'  => $username,
-                    'email'     => $email,
-                    'role_id'   => $roleId,
-                    'is_active' => $isActive,
-                    'user_id'   => $userId,
-                ];
-
-                if ($password !== '') {
-                    if (strlen($password) < 8) {
-                        throw new RuntimeException('Updated passwords must be at least 8 characters long.');
-                    }
-
-                    $updateFields[]         = 'password = :password';
-                    $parameters['password'] = password_hash($password, PASSWORD_DEFAULT);
-                }
-
-                $updateStatement = $pdo->prepare(
-                    'UPDATE User SET ' . implode(', ', $updateFields) . ' WHERE user_id = :user_id'
-                );
-                $updateStatement->execute($parameters);
-
-                if ($userId === (int) current_user_id()) {
-                    $updatedUser = fetch_user_by_id($pdo, $userId);
-                    if ($updatedUser !== null) {
-                        sync_user_session($updatedUser);
-                    }
-                }
-
-                set_flash('success', 'User account updated successfully.');
+            if ($userId === (int) current_user_id() && $roleId !== APP_ROLE_ADMIN) {
+                throw new RuntimeException('You cannot remove your own admin access from this screen.');
             }
+
+            $updateFields = [
+                'full_name = :full_name',
+                'username = :username',
+                'email = :email',
+                'role_id = :role_id',
+                'is_active = :is_active',
+            ];
+            $parameters = [
+                'full_name' => $fullName,
+                'username'  => $username,
+                'email'     => $email,
+                'role_id'   => $roleId,
+                'is_active' => $isActive,
+                'user_id'   => $userId,
+            ];
+
+            if ($password !== '') {
+                if (strlen($password) < 8) {
+                    throw new RuntimeException('New passwords must be at least 8 characters long.');
+                }
+                $updateFields[] = 'password = :password';
+                $parameters['password'] = password_hash($password, PASSWORD_DEFAULT);
+            }
+
+            $updateStatement = $pdo->prepare(
+                'UPDATE User SET ' . implode(', ', $updateFields) . ' WHERE user_id = :user_id'
+            );
+            $updateStatement->execute($parameters);
+
+            set_flash('success', 'User account updated successfully.');
         } elseif (isset($_POST['delete_user'])) {
             $userId = (int) ($_POST['user_id'] ?? 0);
 
@@ -159,10 +118,9 @@ include '../includes/header.php';
 ?>
 
 <div class="mb-6 flex justify-end">
-    <button type="button" onclick="toggleUserModal('addUserModal', true)" class="flex items-center gap-2 rounded-md border border-black px-4 py-2 text-sm font-medium hover:bg-gray-50">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>
-        <span>Add New User</span>
-    </button>
+    <a href="<?php echo h(app_url('pages/users_create.php')); ?>" class="rounded bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors">
+        + Add User
+    </a>
 </div>
 
 <div class="overflow-hidden rounded-lg border border-black">
@@ -232,31 +190,6 @@ include '../includes/header.php';
             </div>
         <?php endforeach; ?>
     <?php endif; ?>
-</div>
-
-<!-- Add User Modal -->
-<div id="addUserModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
-        <div class="mb-4 flex items-center justify-between border-b pb-3">
-            <h2 class="text-xl font-bold">Add New User</h2>
-            <button type="button" onclick="toggleUserModal('addUserModal', false)" class="text-gray-500 hover:text-black">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
-        </div>
-
-        <form method="POST" action="<?php echo h(app_url('pages/users.php')); ?>" class="space-y-4">
-            <?php echo csrf_field(); ?>
-            <?php $formPrefix = ''; include __DIR__ . '/user_form_fields.php'; ?>
-            <div>
-                <label class="mb-1 block text-sm font-medium">Password</label>
-                <input type="password" name="password" required class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500">
-            </div>
-            <div class="flex justify-end gap-2 border-t pt-4">
-                <button type="button" onclick="toggleUserModal('addUserModal', false)" class="rounded border px-4 py-2 hover:bg-gray-50">Cancel</button>
-                <button type="submit" name="add_user" class="rounded bg-black px-4 py-2 text-white hover:bg-gray-800">Create User</button>
-            </div>
-        </form>
-    </div>
 </div>
 
 <!-- Edit User Modal -->

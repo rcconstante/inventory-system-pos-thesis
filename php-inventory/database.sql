@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS Inventory (
     product_id INT,
     current_stock INT DEFAULT 0,
     min_stock_level INT DEFAULT 0,
+    expiry_date DATE DEFAULT NULL,
     date_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES Products(product_id) ON DELETE CASCADE
 );
@@ -100,7 +101,9 @@ CREATE TABLE IF NOT EXISTS Feature_Based_Match (
 -- Migrate existing installs: add new columns if they don't exist yet
 ALTER TABLE User ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
 ALTER TABLE User ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE User ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT NULL;
 ALTER TABLE Category ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
+ALTER TABLE Sale ADD COLUMN IF NOT EXISTS cancel_reason VARCHAR(255) DEFAULT NULL;
 
 -- Insert Default Roles
 INSERT IGNORE INTO Role (role_id, role_type) VALUES 

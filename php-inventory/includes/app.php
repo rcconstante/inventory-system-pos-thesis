@@ -167,7 +167,7 @@ function dashboard_path_for_role(int $roleId): string
     return match ($roleId) {
         APP_ROLE_ADMIN => 'pages/admin_dashboard.php',
         APP_ROLE_CASHIER => 'pages/cashier_dashboard.php',
-        APP_ROLE_STAFF => 'pages/staff_dashboard.php',
+        APP_ROLE_STAFF => 'pages/products.php',
         default => 'index.php',
     };
 }
@@ -197,6 +197,11 @@ function has_any_role(array $allowedRoleIds): bool
 function can_manage_catalog(): bool
 {
     return has_any_role([APP_ROLE_ADMIN, APP_ROLE_STAFF]);
+}
+
+function can_delete_catalog(): bool
+{
+    return has_any_role([APP_ROLE_ADMIN]);
 }
 
 function require_login(array $allowedRoleIds = []): void

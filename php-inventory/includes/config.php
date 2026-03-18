@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-$host = getenv('INVENTORY_DB_HOST') ?: 'localhost';
+$host = getenv('INVENTORY_DB_HOST') ?: '127.0.0.1';
 $dbUser = getenv('INVENTORY_DB_USER') ?: 'root';
 $dbPass = getenv('INVENTORY_DB_PASS') ?: '';
 $dbName = getenv('INVENTORY_DB_NAME') ?: 'inventory_pos_db';

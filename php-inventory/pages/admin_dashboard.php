@@ -7,106 +7,90 @@ require_once '../includes/domain.php';
 
 require_login([APP_ROLE_ADMIN]);
 
-$transactionPage = max(1, (int) ($_GET['page'] ?? 1));
-$perPage = 10;
-$offset = ($transactionPage - 1) * $perPage;
-
 $summaryStatement = $pdo->query(
     "SELECT
-        COALESCE(SUM(CASE WHEN DATE(`date`) = CURDATE() AND status = 'COMPLETED' THEN total_amount ELSE 0 END), 0) AS daily_sales,
-        COALESCE(SUM(CASE WHEN DATE(`date`) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND status = 'COMPLETED' THEN total_amount ELSE 0 END), 0) AS weekly_sales
+        COALESCE(SUM(CASE WHEN DATE(`date`) = CURDATE() AND status = 'COMPLETED' THEN total_amount ELSE 0 END), 0) AS daily_sales
      FROM Sale"
 );
-$summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['daily_sales' => 0, 'weekly_sales' => 0];
+$summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['daily_sales' => 0];
 
 $countStatement = $pdo->query("SELECT COUNT(*) FROM Sale WHERE DATE(`date`) = CURDATE()");
 $totalTransactions = (int) $countStatement->fetchColumn();
-$totalPages = max(1, (int) ceil($totalTransactions / $perPage));
 
-if ($transactionPage > $totalPages) {
-    $transactionPage = $totalPages;
-    $offset = ($transactionPage - 1) * $perPage;
-}
-
-$transactionsStatement = $pdo->prepare(
-    "SELECT sale_id, payment_method, total_amount, status, `date`
-     FROM Sale
-     WHERE DATE(`date`) = CURDATE()
-     ORDER BY `date` DESC, sale_id DESC
-     LIMIT :limit OFFSET :offset"
+// Fast Moving Products
+$fastMovingStatement = $pdo->query(
+    "SELECT p.product_name, SUM(si.quantity) as total_sold
+     FROM Sale_Item si
+     JOIN Products p ON si.product_id = p.product_id
+     JOIN Sale s ON si.sale_id = s.sale_id
+     WHERE s.status = 'COMPLETED'
+     GROUP BY p.product_id
+     ORDER BY total_sold DESC
+     LIMIT 4"
 );
-$transactionsStatement->bindValue(':limit', $perPage, PDO::PARAM_INT);
-$transactionsStatement->bindValue(':offset', $offset, PDO::PARAM_INT);
-$transactionsStatement->execute();
-$transactions = $transactionsStatement->fetchAll(PDO::FETCH_ASSOC);
+$fastMovingProducts = $fastMovingStatement->fetchAll(PDO::FETCH_ASSOC);
+
+// Slow Moving Products
+$slowMovingStatement = $pdo->query(
+    "SELECT p.product_name, COALESCE(SUM(si.quantity), 0) as total_sold
+     FROM Products p
+     LEFT JOIN Sale_Item si ON p.product_id = si.product_id
+     LEFT JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
+     GROUP BY p.product_id
+     ORDER BY total_sold ASC, p.product_name ASC
+     LIMIT 4"
+);
+$slowMovingProducts = $slowMovingStatement->fetchAll(PDO::FETCH_ASSOC);
 
 $page_title = 'DASHBOARD';
 include '../includes/header.php';
 ?>
 
-<h2 class="mb-8 text-2xl font-normal text-black">WELCOME TO FIVE BROTHERS TRADING</h2>
-
 <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
-    <div class="flex items-center gap-6 rounded-lg bg-gradient-to-r from-[#0AC074] to-[#00D4B4] p-8">
-        <div class="w-fit rounded bg-white bg-opacity-30 p-4">
-            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
-        </div>
-        <div class="text-white">
-            <p class="text-lg font-normal">DAILY SALES</p>
-            <p class="text-3xl font-bold">P<?php echo h(money_format_php((float) $summary['daily_sales'])); ?></p>
-        </div>
+    <div class="flex flex-col items-center justify-center rounded-lg bg-[#8E9CFF] p-8 text-black text-center shadow-sm">
+        <p class="text-lg font-normal mb-2">Daily Transaction (Today)</p>
+        <p class="text-3xl font-bold"><?php echo h((string) $totalTransactions); ?></p>
     </div>
 
-    <div class="flex items-center gap-6 rounded-lg bg-gradient-to-r from-[#0065FF] to-[#4B9FFF] p-8">
-        <div class="w-fit rounded bg-white bg-opacity-30 p-4">
-            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
-        </div>
-        <div class="text-white">
-            <p class="text-lg font-normal">WEEKLY SALES</p>
-            <p class="text-3xl font-bold">P<?php echo h(money_format_php((float) $summary['weekly_sales'])); ?></p>
-        </div>
+    <div class="flex flex-col items-center justify-center rounded-lg bg-[#4CD995] p-8 text-black text-center shadow-sm">
+        <p class="text-lg font-normal mb-2">Daily Sales (Today)</p>
+        <p class="text-3xl font-bold"><?php echo h(money_format_php((float) $summary['daily_sales'])); ?></p>
     </div>
 </div>
 
-<div>
-    <div class="mb-4 flex items-center justify-between">
-        <h3 class="text-base font-bold">TODAY'S TRANSACTION</h3>
-        <span class="text-sm text-gray-500"><?php echo h((string) $totalTransactions); ?> transaction(s) today</span>
-    </div>
-
-    <div class="overflow-hidden rounded-lg border border-black">
-        <div class="border-b border-black bg-white">
-            <div class="grid grid-cols-4 gap-4 p-4 text-sm font-semibold">
-                <div>ORDER ID</div>
-                <div>PAYMENT METHOD</div>
-                <div>AMOUNT</div>
-                <div>STATUS</div>
-            </div>
+<div class="overflow-hidden border border-black bg-white">
+    <div class="grid grid-cols-2 divide-x divide-black">
+        <!-- Fast Moving Products -->
+        <div class="p-6">
+            <h3 class="mb-6 text-center text-lg font-bold">FAST MOVING PRODUCTS</h3>
+            <?php if ($fastMovingProducts === []): ?>
+                <p class="text-center text-gray-500">No data available.</p>
+            <?php else: ?>
+                <ul class="space-y-4 pl-8 list-none">
+                    <?php foreach ($fastMovingProducts as $index => $product): ?>
+                        <li class="text-base text-black">
+                            <?php echo ($index + 1) . '. ' . h($product['product_name']); ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
         </div>
 
-        <?php if ($transactions === []): ?>
-            <div class="p-4 text-center text-sm text-gray-500">No transactions recorded today.</div>
-        <?php else: ?>
-            <?php foreach ($transactions as $transaction): ?>
-                <div class="grid grid-cols-4 gap-4 border-b border-black p-4 text-sm last:border-b-0">
-                    <div>#<?php echo h((string) $transaction['sale_id']); ?></div>
-                    <div><?php echo h((string) $transaction['payment_method']); ?></div>
-                    <div>P<?php echo h(money_format_php((float) $transaction['total_amount'])); ?></div>
-                    <div class="font-medium <?php echo strtoupper((string) $transaction['status']) === 'COMPLETED' ? 'text-green-700' : 'text-yellow-700'; ?>">
-                        <?php echo h((string) $transaction['status']); ?>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-
-    <div class="mt-6 flex justify-end gap-3">
-        <?php if ($transactionPage > 1): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage - 1)); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Previous</a>
-        <?php endif; ?>
-        <?php if ($transactionPage < $totalPages): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage + 1)); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Next</a>
-        <?php endif; ?>
+        <!-- Slow Moving Products -->
+        <div class="p-6">
+            <h3 class="mb-6 text-center text-lg font-bold">SLOW MOVING PRODUCTS</h3>
+            <?php if ($slowMovingProducts === []): ?>
+                <p class="text-center text-gray-500">No data available.</p>
+            <?php else: ?>
+                <ul class="space-y-4 pl-8 list-none">
+                    <?php foreach ($slowMovingProducts as $index => $product): ?>
+                        <li class="text-base text-black">
+                            <?php echo ($index + 1) . '. ' . h($product['product_name']); ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 

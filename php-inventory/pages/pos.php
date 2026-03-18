@@ -64,12 +64,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'price' => (float) $product['price'],
                 'qty' => $requestedTotalQuantity,
             ];
+            
+            // Flash message removed to prevent UI break
+        } elseif (isset($_POST['add_multiple_to_cart'])) {
+            $productIds = $_POST['selected_products'] ?? [];
+            if (!is_array($productIds) || empty($productIds)) {
+                throw new RuntimeException('No products selected.');
+            }
+            
+            $addedCount = 0;
+            $productStatement = $pdo->prepare('SELECT p.product_id, p.product_name, p.brand, p.price, COALESCE(i.current_stock, 0) AS current_stock FROM Products p LEFT JOIN Inventory i ON i.product_id = p.product_id WHERE p.product_id = :product_id LIMIT 1');
 
-            set_flash('success', 'Product added to cart.');
+            foreach ($productIds as $pId) {
+                $productId = (int) $pId;
+                $quantity = 1;
+                
+                $productStatement->execute(['product_id' => $productId]);
+                $product = $productStatement->fetch(PDO::FETCH_ASSOC);
+                
+                if ($product && (int)$product['current_stock'] > 0) {
+                    $availableStock = (int) $product['current_stock'];
+                    $existingQuantity = isset($_SESSION['cart'][$productId]['qty']) ? (int) $_SESSION['cart'][$productId]['qty'] : 0;
+                    $requestedTotalQuantity = $existingQuantity + $quantity;
+                    
+                    if ($requestedTotalQuantity <= $availableStock) {
+                        $_SESSION['cart'][$productId] = [
+                            'name' => $product['product_name'],
+                            'brand' => $product['brand'] ?? '',
+                            'price' => (float) $product['price'],
+                            'qty' => $requestedTotalQuantity,
+                        ];
+                        $addedCount++;
+                    }
+                }
+            }
+            
+            $redirectUrl = 'pos.php' . (isset($_GET['q']) ? '?q=' . urlencode($_GET['q']) : '');
+            redirect_to('pages/' . basename($redirectUrl));
+            
+        } elseif (isset($_POST['update_cart_qty'])) {
+            $productId = (int) ($_POST['product_id'] ?? 0);
+            $action = $_POST['action'] ?? '';
+            
+            if (isset($_SESSION['cart'][$productId])) {
+                if ($action === 'increase') {
+                    $productStatement = $pdo->prepare('SELECT COALESCE(i.current_stock, 0) FROM Inventory i WHERE i.product_id = :product_id LIMIT 1');
+                    $productStatement->execute(['product_id' => $productId]);
+                    $stock = (int) ($productStatement->fetchColumn() ?: 0);
+                    
+                    if ($_SESSION['cart'][$productId]['qty'] < $stock) {
+                        $_SESSION['cart'][$productId]['qty']++;
+                    } else {
+                        // Max stock reached
+                    }
+                } elseif ($action === 'decrease') {
+                    if ($_SESSION['cart'][$productId]['qty'] > 1) {
+                        $_SESSION['cart'][$productId]['qty']--;
+                    } else {
+                        unset($_SESSION['cart'][$productId]);
+                    }
+                }
+            }
+            
+            $redirectUrl = 'pos.php?cart=1' . (isset($_GET['q']) ? '&q=' . urlencode($_GET['q']) : '');
+            redirect_to('pages/' . basename($redirectUrl));
+            
         } elseif (isset($_POST['remove_cart_item'])) {
             $productId = (int) ($_POST['product_id'] ?? 0);
             unset($_SESSION['cart'][$productId]);
-            set_flash('success', 'Item removed from cart.');
+            // Flash message removed
         } elseif (isset($_POST['checkout'])) {
             if ($_SESSION['cart'] === []) {
                 throw new RuntimeException('Add at least one item to the cart before checkout.');
@@ -167,7 +230,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             $_SESSION['cart'] = [];
-            set_flash('success', 'Transaction completed successfully. Order ID: #' . $saleId);
+            // Remove flash message, use receipt modal instead
+            redirect_to('pages/pos.php?receipt_id=' . $saleId);
+            exit;
         }
     } catch (RuntimeException $exception) {
         if ($pdo->inTransaction()) {
@@ -182,8 +247,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         set_flash('error', 'The checkout action could not be completed.');
     }
-
-    redirect_to('pages/pos.php');
+    
+    // Redirect preserving query string if any
+    $qs = $_SERVER['QUERY_STRING'] ?? '';
+    redirect_to('pages/pos.php' . ($qs !== '' ? '?' . $qs : ''));
 }
 
 $searchTerm = trim((string) ($_GET['q'] ?? ''));
@@ -232,182 +299,406 @@ foreach ($cart as $item) {
     $totalDue += ((float) $item['price']) * ((int) $item['qty']);
 }
 
+$flatRecommendations = [];
+foreach ($recommendations as $recList) {
+    foreach ($recList as $rec) {
+        $flatRecommendations[$rec['alternative_id']] = $rec;
+    }
+}
+
+// Check for receipt modal
+$receiptSale = null;
+$receiptItems = [];
+if (isset($_GET['receipt_id'])) {
+    $receiptId = (int)$_GET['receipt_id'];
+    $receiptSaleStmt = $pdo->prepare("SELECT * FROM Sale WHERE sale_id = ?");
+    $receiptSaleStmt->execute([$receiptId]);
+    $receiptSale = $receiptSaleStmt->fetch(PDO::FETCH_ASSOC);
+    if ($receiptSale) {
+        $receiptItemsStmt = $pdo->prepare("SELECT si.*, p.product_name FROM Sale_Item si JOIN Products p ON si.product_id = p.product_id WHERE si.sale_id = ?");
+        $receiptItemsStmt->execute([$receiptId]);
+        $receiptItems = $receiptItemsStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
 $page_title = 'POINT OF SALE';
 include '../includes/header.php';
 ?>
 
-<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
-    <form method="GET" class="flex items-end gap-3">
-        <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">Search</label>
-            <input type="text" name="q" value="<?php echo h($searchTerm); ?>" placeholder="Product, brand, compatibility" class="rounded border border-black px-3 py-2 text-sm w-72">
+<!-- Main POS View -->
+<div id="pos-main-view" class="<?php echo isset($_GET['checkout']) ? 'hidden' : 'flex'; ?> h-[calc(100vh-140px)] -m-8 font-sans">
+    <!-- Main Left side: POS List -->
+    <div class="flex-1 flex flex-col bg-white dark:bg-gray-900 border-r border-black dark:border-gray-700 relative">
+        <!-- Search -->
+        <div class="border-b border-black dark:border-gray-700">
+             <form method="GET" class="relative">
+                 <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-black dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                 </div>
+                 <input type="text" name="q" value="<?php echo h($searchTerm); ?>" placeholder="Engine Oil 10W-40" class="w-full pl-14 pr-4 py-5 text-lg border-0 focus:ring-0 bg-transparent dark:bg-gray-800 dark:text-white placeholder-gray-400 outline-none">
+             </form>
         </div>
-        <button type="submit" class="rounded bg-black px-4 py-2 text-sm text-white hover:bg-gray-800">Search</button>
-    </form>
-
-    <div class="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
-        Default payment: <span class="font-semibold"><?php echo h(preferred_payment_method()); ?></span>
+        
+        <!-- Table -->
+        <div class="flex-1 overflow-auto bg-white dark:bg-gray-900 pb-24">
+            <form id="pos-form" method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>">
+                <?php echo csrf_field(); ?>
+                <table class="w-full text-left border-collapse">
+                    <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-gray-700 z-10">
+                        <tr>
+                            <th class="py-4 px-6 w-12 border-b border-black dark:border-gray-700"></th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">NO.</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PCODE</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRODUCT NAME</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">BRAND</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">CATEGORY</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRICE</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-black dark:divide-gray-700">
+                        <?php $no = 1; foreach ($products as $product): ?>
+                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                <td class="py-4 px-6">
+                                    <input type="checkbox" name="selected_products[]" value="<?php echo h((string)$product['product_id']); ?>" class="w-5 h-5 border-black dark:border-gray-600 rounded-sm focus:ring-black">
+                                </td>
+                                <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
+                                <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
+                                <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
+                                <td class="py-4 px-6 text-sm"><?php echo h($product['brand'] ?: '-'); ?></td>
+                                <td class="py-4 px-6 text-sm"><?php echo h($product['category_name']); ?></td>
+                                <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($products)): ?>
+                            <tr><td colspan="7" class="py-8 text-center text-gray-500">No products found.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+                
+                <!-- Bottom Buttons Fixed -->
+                <div class="absolute bottom-0 left-0 right-0 border-t border-black dark:border-gray-700 p-6 flex gap-6 bg-white dark:bg-gray-900 z-20">
+                    <button type="submit" name="add_multiple_to_cart" class="border border-black dark:border-gray-400 rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
+                    <button type="reset" class="border border-black dark:border-gray-400 rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Remove</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Right side: Recommendations -->
+    <div class="w-[450px] flex flex-col bg-white dark:bg-gray-900 flex-shrink-0">
+        <div class="p-6 border-b border-black dark:border-gray-700">
+            <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm ?: 'SELECT PRODUCT'); ?></h2>
+        </div>
+        <div class="py-3 px-6 border-b border-black dark:border-gray-700">
+            <span class="font-bold text-sm tracking-wide"><?php echo count($flatRecommendations); ?> Featured-Based</span>
+        </div>
+        
+        <div class="flex-1 overflow-auto">
+            <table class="w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-gray-700 z-10">
+                    <tr>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRODUCT NAME</th>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">BRAND</th>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRICE</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-black dark:divide-gray-700">
+                    <?php if (empty($flatRecommendations)): ?>
+                        <tr><td colspan="3" class="py-8 text-center text-gray-500">No recommendations available</td></tr>
+                    <?php else: ?>
+                        <?php foreach (array_slice($flatRecommendations, 0, 10) as $rec): ?>
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td class="py-4 px-6 text-sm"><?php echo h($rec['alternative_name']); ?></td>
+                            <td class="py-4 px-6 text-sm">N/A</td>
+                            <td class="py-4 px-6 text-sm">
+                                <div class="flex items-center justify-between gap-4">
+                                    <span><?php echo h((string)round((float)($rec['price'] ?? 0))); ?></span>
+                                    <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="flex gap-2">
+                                        <?php echo csrf_field(); ?>
+                                        <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
+                                        <input type="hidden" name="qty" value="1">
+                                        <button type="submit" name="add_to_cart" class="border border-black dark:border-gray-500 rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
+                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'])); ?>')" class="border border-black dark:border-gray-500 rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<div class="grid grid-cols-1 gap-6 md:grid-cols-3">
-    <div class="space-y-4 md:col-span-2">
-        <h3 class="border-b pb-2 text-lg font-bold">Select Products</h3>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <?php if ($products === []): ?>
-                <div class="col-span-full rounded border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
-                    No in-stock products match the current filters.
-                </div>
-            <?php else: ?>
-                <?php foreach ($products as $product): ?>
-                    <?php
-                    $productId = (int) $product['product_id'];
-                    $currentStock = (int) $product['current_stock'];
-                    $minStockLevel = (int) $product['min_stock_level'];
-                    $topRecommendation = $recommendations[$productId][0] ?? null;
-                    $isLowStock = $minStockLevel > 0 && $currentStock <= $minStockLevel;
-                    ?>
-                    <div class="flex flex-col justify-between rounded border bg-white p-4 transition-shadow hover:shadow-lg">
-                        <div>
-                            <div class="flex items-start justify-between gap-3">
-                                <div>
-                                    <h4 class="text-sm font-medium"><?php echo h($product['product_name']); ?></h4>
-                                    <div class="mt-1 text-xs text-gray-500">
-                                        <?php echo h($product['category_name']); ?>
-                                        <?php if ($product['brand'] !== ''): ?>
-                                            <span class="mx-1">·</span><?php echo h($product['brand']); ?>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                                <span class="rounded-full px-2 py-1 text-xs font-semibold <?php echo $isLowStock ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'; ?>">
-                                    <?php echo $isLowStock ? 'Low stock' : 'Ready'; ?>
-                                </span>
-                            </div>
-                            <div class="mt-2 text-xs text-blue-600">Stock: <?php echo h((string) $currentStock); ?><?php echo $minStockLevel > 0 ? ' / Min ' . h((string) $minStockLevel) : ''; ?></div>
-                            <?php if ($product['compatibility'] !== ''): ?>
-                                <div class="mt-1 text-xs text-gray-500"><?php echo h($product['compatibility']); ?></div>
-                            <?php endif; ?>
-                            <?php if ($topRecommendation): ?>
-                                <div class="mt-2 rounded bg-blue-50 px-2 py-2 text-xs text-blue-700">
-                                    Alternative: <?php echo h($topRecommendation['alternative_name']); ?> (<?php echo h($topRecommendation['matched_attribute']); ?>)
-                                </div>
-                            <?php endif; ?>
-                        </div>
+<!-- Specs Modal -->
+<div id="specsModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+    <div class="w-[500px] bg-white dark:bg-gray-800 shadow-2xl border border-black dark:border-gray-600 flex flex-col">
+        <div class="p-8">
+            <h3 class="text-sm font-bold uppercase mb-4 tracking-wider">COMPATIBILITY</h3>
+            <ul class="list-disc list-inside text-sm mb-8 ml-2" id="specsCompatibility">
+                <li>N/A</li>
+            </ul>
+            <h3 class="text-sm font-bold uppercase mb-4 tracking-wider">SPECIFICATIONS</h3>
+            <ul class="list-disc list-inside text-sm ml-2" id="specsDetails">
+                <li>N/A</li>
+            </ul>
+        </div>
+        <div class="p-6 border-t border-black dark:border-gray-600 flex justify-center gap-6">
+            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-gray-500 rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add & Return POS</button>
+            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-gray-500 rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Back</button>
+        </div>
+    </div>
+</div>
 
-                        <div class="mt-4">
-                            <div class="w-full border-t pt-2 text-base font-bold">P<?php echo h(money_format_php((float) $product['price'])); ?></div>
-                            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="mt-2 flex gap-2">
+<!-- Cart Modal -->
+<div id="cartModal" class="<?php echo isset($_GET['cart']) ? 'flex' : 'hidden'; ?> fixed inset-0 z-[60] items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div class="w-[600px] bg-white dark:bg-gray-800 border border-black dark:border-gray-600 shadow-2xl flex flex-col">
+        <div class="border-b border-black dark:border-gray-600 py-4 text-center">
+            <h2 class="text-xl font-bold uppercase tracking-widest text-black dark:text-white">CART</h2>
+        </div>
+        <div class="p-8 flex-1 overflow-auto max-h-[50vh] space-y-8">
+            <?php if (empty($cart)): ?>
+                <div class="text-center text-gray-500 py-8">Cart is empty</div>
+            <?php else: ?>
+                <?php foreach ($cart as $productId => $item): ?>
+                    <div class="flex justify-between items-center text-black dark:text-white">
+                        <div>
+                            <div class="text-lg font-medium"><?php echo h($item['name']); ?></div>
+                            <div class="text-sm mt-1">Price: ₱<?php echo number_format((float)$item['price'], 2); ?></div>
+                        </div>
+                        <div class="flex items-center gap-6 text-xl">
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
                                 <?php echo csrf_field(); ?>
-                                <input type="hidden" name="product_id" value="<?php echo h((string) $productId); ?>">
-                                <input type="number" name="qty" value="1" min="1" max="<?php echo h((string) $currentStock); ?>" class="w-16 rounded border px-2 py-1 text-center text-sm">
-                                <button type="submit" name="add_to_cart" class="flex-1 rounded bg-black py-1 text-sm text-white hover:bg-gray-800">Add</button>
+                                <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
+                                <input type="hidden" name="action" value="decrease">
+                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
+                                    -
+                                </button>
+                            </form>
+                            <span class="w-4 text-center text-lg font-medium"><?php echo h((string)$item['qty']); ?></span>
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
+                                <input type="hidden" name="action" value="increase">
+                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
+                                    +
+                                </button>
                             </form>
                         </div>
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
+        <div class="p-8 flex justify-between items-center text-black dark:text-white border-t border-black dark:border-gray-600">
+            <div class="text-lg font-medium">Subtotal: ₱ <?php echo number_format($totalDue, 2); ?></div>
+            <div class="flex gap-4">
+                <button type="button" onclick="openCheckoutModal()" <?php echo empty($cart) ? 'disabled' : ''; ?> class="border border-black dark:border-gray-500 rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent <?php echo empty($cart) ? 'opacity-50 cursor-not-allowed' : ''; ?>">Check out</button>
+                <button type="button" onclick="closeCartModal()" class="border border-black dark:border-gray-500 rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent">Back</button>
+            </div>
+        </div>
     </div>
+</div>
 
-    <div class="flex h-fit flex-col rounded border bg-white shadow-sm">
-        <div class="border-b bg-gray-50 p-4 font-bold">Current Order</div>
-        <div class="min-h-[300px] w-full flex-1 overflow-y-auto p-4">
-            <?php if ($cart === []): ?>
-                <div class="my-auto p-8 text-center text-gray-400">Cart is empty</div>
-            <?php else: ?>
-                <div class="space-y-4">
-                    <?php foreach ($cart as $productId => $item): ?>
-                        <div class="flex items-start justify-between border-b pb-2 text-sm">
-                            <div class="flex-1">
-                                <div class="font-medium"><?php echo h($item['name']); ?></div>
-                                <div class="text-xs text-gray-500">P<?php echo h(money_format_php((float) $item['price'])); ?> x <?php echo h((string) $item['qty']); ?></div>
-                            </div>
-                            <div class="flex flex-col items-end gap-1">
-                                <span class="font-bold">P<?php echo h(money_format_php(((float) $item['price']) * ((int) $item['qty']))); ?></span>
-                                <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>">
+<!-- Checkout View (In-page) -->
+<div id="pos-checkout-view" class="<?php echo isset($_GET['checkout']) ? 'flex' : 'hidden'; ?> h-[calc(100vh-140px)] -m-8 font-sans bg-white dark:bg-gray-900 text-black dark:text-white border-t border-black dark:border-gray-700">
+    <!-- Left Column: Transaction Details -->
+    <div class="w-[400px] flex-shrink-0 flex flex-col border-r border-black dark:border-gray-700">
+        <div class="flex-1 overflow-auto pt-8">
+            <h2 class="text-xl font-bold text-center mb-2 tracking-wide">TRANSACTION NO. <?php echo rand(1, 999); ?></h2>
+            <p class="text-sm text-center mb-8">Date: <?php echo date('F d, Y'); ?></p>
+            
+            <div class="flex justify-between font-bold px-8 mb-4">
+                <span>Products Name</span>
+                <span>Amount</span>
+            </div>
+            <div class="px-8 space-y-4 text-sm font-medium mb-8">
+                <?php foreach ($cart as $item): ?>
+                    <div class="flex justify-between">
+                        <span><?php echo h($item['name']); ?></span>
+                        <span>₱<?php echo number_format((float)$item['price'], 2); ?></span>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <div class="border-t border-black dark:border-gray-700 p-8 flex flex-col gap-3 text-lg font-medium">
+            <div>Total: <?php echo number_format($totalDue, 2); ?></div>
+            <div class="flex items-center gap-2">
+                <span>Amount Received:</span>
+                <input type="number" id="amountReceived" class="border border-black dark:border-gray-400 px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
+            </div>
+            <div>Change: <span id="changeAmount">0.00</span></div>
+        </div>
+    </div>
+    
+    <!-- Right Column: Payment & Recommended -->
+    <div class="flex-1 flex flex-col p-12 items-center relative">
+        <h3 class="text-center text-sm font-bold uppercase mb-8 tracking-wide">SELECT PAYMENT METHOD</h3>
+        
+        <div class="flex justify-center gap-8 mb-8 w-full max-w-lg">
+            <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="flex-1 border-2 border-black dark:border-gray-400 py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">CASH</button>
+            <button type="button" id="btnGCASH" onclick="setPaymentMethod('GCASH')" class="flex-1 border border-black dark:border-gray-400 py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">GCASH</button>
+        </div>
+        
+        <div id="refNumberContainer" class="hidden flex-col items-center mb-12 w-full max-w-lg">
+            <label class="block text-sm mb-4">If paying via GCASH, enter Reference Number</label>
+            <input type="text" id="referenceNumber" class="w-full border border-black dark:border-gray-400 px-4 py-3 bg-transparent focus:outline-none">
+        </div>
+        
+        <div class="flex flex-col items-center mb-auto w-full max-w-lg">
+            <h4 class="font-medium mb-6">Recommended Products:</h4>
+            <div class="w-full space-y-4">
+                <?php if (empty($flatRecommendations)): ?>
+                    <div class="border border-black dark:border-gray-400 p-6 text-center text-sm font-medium bg-white dark:bg-gray-800 text-gray-500">
+                        Currently no recommended products
+                    </div>
+                <?php else: ?>
+                    <?php foreach (array_slice($flatRecommendations, 0, 3) as $rec): ?>
+                        <div class="flex items-center justify-between border border-black dark:border-gray-400 pl-6 pr-0 py-0 font-medium bg-white dark:bg-gray-800">
+                            <span><?php echo h($rec['alternative_name']); ?></span>
+                            <div class="flex items-center gap-6">
+                                <span>₱ <?php echo number_format((float)($rec['price'] ?? 0), 2); ?></span>
+                                <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1' . (isset($_GET['q']) ? '&q=' . urlencode($_GET['q']) : ''))); ?>" class="m-0">
                                     <?php echo csrf_field(); ?>
-                                    <input type="hidden" name="product_id" value="<?php echo h((string) $productId); ?>">
-                                    <button type="submit" name="remove_cart_item" class="text-xs text-red-500 hover:text-red-700">Remove</button>
+                                    <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
+                                    <input type="hidden" name="qty" value="1">
+                                    <button type="submit" name="add_to_cart" class="border-l border-black dark:border-gray-400 px-6 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors h-full text-sm font-bold bg-white dark:bg-gray-800 text-black dark:text-white">Add</button>
                                 </form>
                             </div>
                         </div>
                     <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </div>
-
-        <div class="border-t bg-gray-50 p-4">
-            <div class="mb-4 flex items-center justify-between">
-                <span class="text-lg font-bold">Total Due:</span>
-                <span class="text-xl font-bold text-blue-600">P<?php echo h(money_format_php($totalDue)); ?></span>
+                <?php endif; ?>
             </div>
-
-            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="space-y-3" id="checkout-form">
+        </div>
+        
+        <div class="absolute bottom-12 right-12 flex justify-end gap-4">
+            <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-gray-400 px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CANCEL</button>
+            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="checkoutForm">
                 <?php echo csrf_field(); ?>
-                <div>
-                    <label class="mb-1 block text-sm font-medium text-gray-700">Payment Method</label>
-                    <select name="payment_method" class="w-full rounded border border-gray-300 px-3 py-2 text-sm">
-                        <?php foreach (['CASH', 'GCASH', 'CARD'] as $paymentMethod): ?>
-                            <option value="<?php echo h($paymentMethod); ?>" <?php echo preferred_payment_method() === $paymentMethod ? 'selected' : ''; ?>>
-                                <?php echo h($paymentMethod); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <button type="button" <?php echo $cart === [] ? 'disabled' : ''; ?> onclick="openCheckoutModal()" class="w-full rounded py-3 font-bold text-white transition-colors <?php echo $cart === [] ? 'cursor-not-allowed bg-gray-400' : 'bg-green-600 hover:bg-green-700'; ?>">
-                    COMPLETE CHECKOUT
-                </button>
+                <input type="hidden" name="checkout" value="1">
+                <input type="hidden" name="payment_method" id="selectedPaymentMethod" value="CASH">
+                <button type="submit" class="border border-black dark:border-gray-400 px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CONFIRM PAYMENT</button>
             </form>
         </div>
     </div>
 </div>
+<script>
+    const totalDue = <?php echo json_encode($totalDue); ?>;
+    
+    function calculateChange() {
+        const received = parseFloat(document.getElementById('amountReceived').value) || 0;
+        const change = received - totalDue;
+        document.getElementById('changeAmount').textContent = change > 0 ? change.toFixed(2) : "0.00";
+    }
+    
+    function setPaymentMethod(method) {
+        document.getElementById('selectedPaymentMethod').value = method;
+        if (method === 'CASH') {
+            document.getElementById('btnCASH').classList.add('border-2');
+            document.getElementById('btnCASH').classList.remove('border');
+            document.getElementById('btnGCASH').classList.remove('border-2');
+            document.getElementById('btnGCASH').classList.add('border');
+            document.getElementById('refNumberContainer').classList.add('hidden');
+        } else {
+            document.getElementById('btnGCASH').classList.add('border-2');
+            document.getElementById('btnGCASH').classList.remove('border');
+            document.getElementById('btnCASH').classList.remove('border-2');
+            document.getElementById('btnCASH').classList.add('border');
+            document.getElementById('refNumberContainer').classList.remove('hidden');
+        }
+    }
 
-<!-- Checkout Confirmation Modal -->
-<div id="checkoutModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-        <div class="mb-4 flex items-start gap-3">
-            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-green-100">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
-            </div>
-            <div>
-                <h3 class="text-base font-bold text-gray-900">Complete Transaction</h3>
-                <p class="mt-1 text-sm text-gray-500">Confirm checkout for <strong>P<?php echo h(money_format_php($totalDue)); ?></strong>?</p>
-            </div>
+    function openCartModal() {
+        document.getElementById('cartModal').classList.remove('hidden');
+        document.getElementById('cartModal').classList.add('flex');
+    }
+
+    function closeCartModal() {
+        document.getElementById('cartModal').classList.add('hidden');
+        document.getElementById('cartModal').classList.remove('flex');
+        const url = new URL(window.location);
+        url.searchParams.delete('cart');
+        window.history.pushState({}, '', url);
+    }
+
+    function openCheckoutModal() {
+        closeCartModal();
+        const url = new URL(window.location);
+        url.searchParams.set('checkout', '1');
+        window.history.pushState({}, '', url);
+        document.getElementById('pos-main-view').classList.add('hidden');
+        document.getElementById('pos-main-view').classList.remove('flex');
+        document.getElementById('pos-checkout-view').classList.remove('hidden');
+        document.getElementById('pos-checkout-view').classList.add('flex');
+    }
+
+    function closeCheckoutPage() {
+        const url = new URL(window.location);
+        url.searchParams.delete('checkout');
+        window.history.pushState({}, '', url);
+        document.getElementById('pos-checkout-view').classList.add('hidden');
+        document.getElementById('pos-checkout-view').classList.remove('flex');
+        document.getElementById('pos-main-view').classList.remove('hidden');
+        document.getElementById('pos-main-view').classList.add('flex');
+    }
+    
+    function openSpecsModal(name, compatibility) {
+        document.getElementById('specsCompatibility').innerHTML = `<li>${compatibility || 'N/A'}</li>`;
+        document.getElementById('specsDetails').innerHTML = `<li>Product: ${name}</li>`;
+        document.getElementById('specsModal').classList.remove('hidden');
+        document.getElementById('specsModal').classList.add('flex');
+    }
+    
+    function closeSpecsModal() {
+        document.getElementById('specsModal').classList.add('hidden');
+        document.getElementById('specsModal').classList.remove('flex');
+    }
+</script>
+
+<!-- Receipt Modal -->
+<?php if (isset($receiptSale) && $receiptSale): ?>
+<div class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+    <div class="w-[500px] bg-white text-black border border-black shadow-2xl flex flex-col relative">
+        <a href="<?php echo h(app_url('pages/pos.php')); ?>" class="absolute top-4 right-4 text-black hover:text-gray-600">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </a>
+        
+        <div class="p-8 text-center border-b border-black">
+            <h2 class="text-xl font-medium tracking-widest uppercase mb-2">FIVE BROTHERS TRADING</h2>
+            <p class="text-sm mb-1">0961-195-6139</p>
+            <p class="text-sm mb-1">Mabuhay Carmona, Cavite</p>
+            <p class="text-sm mb-1">Opening Hours: 9:00 AM - 3:00 PM</p>
+            <p class="text-sm mt-3">Date: <?php echo date('F d, Y', strtotime($receiptSale['sale_date'] ?? 'now')); ?></p>
         </div>
-        <div class="flex justify-end gap-2 border-t pt-4">
-            <button type="button" onclick="closeCheckoutModal()" class="rounded border px-4 py-2 text-sm hover:bg-gray-50">Cancel</button>
-            <button type="button" onclick="submitCheckout()" class="rounded bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-700">Confirm</button>
+        
+        <div class="p-8 flex-1 overflow-auto max-h-[40vh]">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left font-bold border-b border-black">
+                        <th class="pb-3 w-16">QTY</th>
+                        <th class="pb-3">DESCRIPTION</th>
+                        <th class="pb-3 text-right">AMOUNT</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    <?php foreach ($receiptItems as $item): ?>
+                    <tr>
+                        <td class="py-4 font-medium"><?php echo h((string)$item['quantity']); ?></td>
+                        <td class="py-4 font-medium"><?php echo h($item['product_name']); ?></td>
+                        <td class="py-4 text-right font-medium"><?php echo number_format((float)$item['subtotal'], 2); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="p-8 border-t border-black bg-white">
+            <div class="text-sm font-bold mb-3">TOTAL: <?php echo number_format((float)$receiptSale['total_amount'], 2); ?></div>
+            <div class="text-sm font-bold mb-8 uppercase">PAID BY: <?php echo h($receiptSale['payment_method']); ?></div>
+            <div class="text-center text-sm font-medium">Thank You :)</div>
         </div>
     </div>
 </div>
-
-<script>
-    function openCheckoutModal() {
-        var modal = document.getElementById('checkoutModal');
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-    }
-
-    function closeCheckoutModal() {
-        var modal = document.getElementById('checkoutModal');
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-    }
-
-    function submitCheckout() {
-        var form = document.getElementById('checkout-form');
-        var input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'checkout';
-        input.value = '1';
-        form.appendChild(input);
-        form.submit();
-    }
-
-    document.getElementById('checkoutModal').addEventListener('click', function (e) {
-        if (e.target === this) closeCheckoutModal();
-    });
-</script>
+<?php endif; ?>
 
 <?php include '../includes/footer.php'; ?>

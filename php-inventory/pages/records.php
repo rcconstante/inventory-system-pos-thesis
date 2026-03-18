@@ -5,7 +5,7 @@ require_once '../includes/app.php';
 require_once '../includes/config.php';
 require_once '../includes/domain.php';
 
-require_login();
+require_login([APP_ROLE_ADMIN, APP_ROLE_CASHIER]);
 
 $tabs = [
     'top_selling' => 'Top Selling',
@@ -14,7 +14,7 @@ $tabs = [
     'cancelled_orders' => 'Cancelled Orders',
 ];
 
-$defaultTab = current_role_id() === APP_ROLE_STAFF ? 'critical_stocks' : 'top_selling';
+$defaultTab = 'top_selling';
 $activeTab = (string) ($_GET['tab'] ?? $defaultTab);
 if (!isset($tabs[$activeTab])) {
     $activeTab = $defaultTab;
@@ -42,8 +42,10 @@ $records = [];
 if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
+            p.product_id,
             c.category_name,
             p.product_name,
+            p.brand,
             SUM(si.quantity) AS total_quantity,
             SUM(si.subtotal) AS total_amount
          FROM Sale_Item si
@@ -51,7 +53,7 @@ if ($activeTab === 'top_selling') {
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
          WHERE s.status = 'COMPLETED' AND " . implode(' AND ', $salesFilters) . "
-         GROUP BY p.product_id, c.category_name, p.product_name
+         GROUP BY p.product_id, c.category_name, p.product_name, p.brand
          ORDER BY total_quantity DESC, total_amount DESC, p.product_name ASC"
     );
     $statement->execute($queryParameters);
@@ -60,8 +62,10 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
             s.sale_id,
+            p.product_id,
             c.category_name,
             p.product_name,
+            p.brand,
             si.quantity,
             si.subtotal
          FROM Sale_Item si
@@ -77,10 +81,12 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
             s.sale_id,
+            p.product_id,
             c.category_name,
             p.product_name,
+            p.brand,
             si.quantity,
-            si.subtotal
+            s.cancel_reason
          FROM Sale_Item si
          INNER JOIN Sale s ON s.sale_id = si.sale_id
          INNER JOIN Products p ON p.product_id = si.product_id
@@ -96,6 +102,8 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->query(
         "SELECT
             ra.reorder_id,
+            p.product_id,
+            c.category_name,
             p.product_name,
             COALESCE(p.brand, '') AS brand,
             ra.current_stock,
@@ -103,12 +111,13 @@ if ($activeTab === 'top_selling') {
             ra.alert_status
          FROM Reorder_Alert ra
          INNER JOIN Products p ON p.product_id = ra.product_id
+         LEFT JOIN Category c ON c.category_id = p.category_id
          ORDER BY ra.current_stock ASC, p.product_name ASC"
     );
     $records = $statement->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$page_title = 'RECORDS';
+$page_title = 'REPORTS';
 include '../includes/header.php';
 ?>
 
@@ -137,20 +146,34 @@ include '../includes/header.php';
 
 <div class="overflow-hidden rounded-lg border border-black">
     <?php if ($activeTab === 'critical_stocks'): ?>
-        <div class="grid grid-cols-5 gap-4 border-b border-black bg-white p-4 text-sm font-medium">
+        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
             <div>NO</div>
-            <div>PRODUCT</div>
+            <div>PRODUCT ID</div>
+            <div>CATEGORY</div>
+            <div>PRODUCT NAME</div>
             <div>BRAND</div>
-            <div>CURRENT STOCK</div>
-            <div>MIN STOCK</div>
+            <div>STOCK ON HAND</div>
+            <div>REORDER LEVEL</div>
+        </div>
+    <?php elseif ($activeTab === 'cancelled_orders'): ?>
+        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
+            <div>NO</div>
+            <div>PRODUCT ID</div>
+            <div>CATEGORY</div>
+            <div>PRODUCT NAME</div>
+            <div>BRAND</div>
+            <div>QUANTITY</div>
+            <div>REASON</div>
         </div>
     <?php else: ?>
-        <div class="grid grid-cols-5 gap-4 border-b border-black bg-white p-4 text-sm font-medium">
-            <div><?php echo in_array($activeTab, ['sold_items', 'cancelled_orders'], true) ? 'ORDER ID' : 'NO'; ?></div>
+        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
+            <div>NO</div>
+            <div>PRODUCT ID</div>
             <div>CATEGORY</div>
-            <div>PRODUCT</div>
+            <div>PRODUCT NAME</div>
+            <div>BRAND</div>
             <div>QUANTITY</div>
-            <div>TOTAL (P)</div>
+            <div>TOTAL SALES</div>
         </div>
     <?php endif; ?>
 
@@ -159,18 +182,32 @@ include '../includes/header.php';
     <?php else: ?>
         <?php foreach ($records as $index => $record): ?>
             <?php if ($activeTab === 'critical_stocks'): ?>
-                <div class="grid grid-cols-5 gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
                     <div><?php echo h((string) ($index + 1)); ?></div>
+                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
+                    <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
                     <div class="font-semibold text-red-600"><?php echo h((string) $record['current_stock']); ?></div>
                     <div><?php echo h((string) $record['min_stock_level']); ?></div>
                 </div>
-            <?php else: ?>
-                <div class="grid grid-cols-5 gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
-                    <div><?php echo isset($record['sale_id']) ? '#' . h((string) $record['sale_id']) : h((string) ($index + 1)); ?></div>
+            <?php elseif ($activeTab === 'cancelled_orders'): ?>
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                    <div><?php echo h((string) ($index + 1)); ?></div>
+                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
                     <div><?php echo h($record['product_name']); ?></div>
+                    <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
+                    <div><?php echo h((string) ($record['quantity'] ?? 0)); ?></div>
+                    <div><?php echo h($record['cancel_reason'] ?? 'User Cancelled'); ?></div>
+                </div>
+            <?php else: ?>
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                    <div><?php echo h((string) ($index + 1)); ?></div>
+                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
+                    <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
+                    <div><?php echo h($record['product_name']); ?></div>
+                    <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
                     <div><?php echo h((string) ($record['quantity'] ?? $record['total_quantity'] ?? 0)); ?></div>
                     <div><?php echo h(money_format_php((float) ($record['subtotal'] ?? $record['total_amount'] ?? 0))); ?></div>
                 </div>

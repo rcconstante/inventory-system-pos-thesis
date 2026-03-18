@@ -4,21 +4,21 @@ declare(strict_types=1);
 require_once 'includes/app.php';
 require_once 'includes/config.php';
 
-$role = strtolower((string) ($_GET['role'] ?? 'admin'));
-$selectedRoleId = role_slug_to_id($role);
 $error = '';
 $flashMessages = pull_flash_messages();
 
-if ($selectedRoleId === null) {
-    $role = 'admin';
-    $selectedRoleId = APP_ROLE_ADMIN;
-}
+// Retrieve remembered username if available
+$remembered_username = $_COOKIE['remembered_username'] ?? '';
+$remembered_role = $_COOKIE['remembered_role'] ?? 'admin';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    validate_csrf_or_fail('login.php?role=' . $role);
+    validate_csrf_or_fail('login.php');
 
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
+    $postedRole = strtolower(trim((string) ($_POST['role'] ?? 'admin')));
+    $selectedRoleId = role_slug_to_id($postedRole) ?? APP_ROLE_ADMIN;
+    $remember_me = isset($_POST['remember_me']);
 
     $statement = $pdo->prepare('SELECT * FROM User WHERE email = :email OR username = :username LIMIT 1');
     $statement->execute([
@@ -31,6 +31,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($user['is_active'])) {
             $error = 'Your account has been deactivated. Please contact an administrator.';
         } else {
+            // Handle Remember Me
+            if ($remember_me) {
+                // Set cookie for 30 days
+                setcookie('remembered_username', $email, time() + (86400 * 30), "/");
+                setcookie('remembered_role', $postedRole, time() + (86400 * 30), "/");
+            } else {
+                // Clear cookies if unchecked
+                setcookie('remembered_username', '', time() - 3600, "/");
+                setcookie('remembered_role', '', time() - 3600, "/");
+            }
+
             session_regenerate_id(true);
             sync_user_session($user);
             redirect_to(dashboard_path_for_role((int) $user['role_id']));
@@ -87,13 +98,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <!-- Title -->
-            <h1 class="text-white text-2xl font-bold text-center mb-8">
-                POINT OF SALE AND INVENTORY MANAGEMENT SYSTEM<br>
-                <span class="text-lg font-normal text-gray-300 capitalize">(<?php echo htmlspecialchars($role); ?> Login)</span>
+            <h1 class="text-white text-xl font-bold text-center mb-8">
+                INVENTORY MANAGEMENT AND POINT OF SALE SYSTEM
             </h1>
 
             <?php if($error): ?>
-                <div class="bg-red-500 text-white p-3 rounded mb-4 text-center w-full max-w-md">
+                <div class="bg-red-500 text-white p-3 rounded mb-4 text-center w-full max-w-md text-sm">
                     <?php echo h($error); ?>
                 </div>
             <?php endif; ?>
@@ -118,28 +128,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
 
             <!-- Form -->
-            <form method="POST" action="<?php echo h(app_url('login.php?role=' . $role)); ?>" class="w-full max-w-md space-y-6">
+            <form method="POST" action="<?php echo h(app_url('login.php')); ?>" class="w-full max-w-md space-y-4">
                 <?php echo csrf_field(); ?>
+                
+                <!-- Role Selector -->
+                <div>
+                    <label class="block text-white text-sm mb-1">Role</label>
+                    <select name="role" required class="w-full px-4 py-3 border border-gray-300 rounded bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23374151%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[position:right_1rem_center]">
+                        <option value="admin" <?php echo $remembered_role === 'admin' ? 'selected' : ''; ?>>ADMIN</option>
+                        <option value="cashier" <?php echo $remembered_role === 'cashier' ? 'selected' : ''; ?>>CASHIER</option>
+                        <option value="staff" <?php echo $remembered_role === 'staff' ? 'selected' : ''; ?>>STAFF</option>
+                    </select>
+                </div>
+
                 <!-- Email/Username -->
                 <div>
-                    <label class="block text-white text-sm mb-2">Username or Email</label>
+                    <label class="block text-white text-sm mb-1">Username</label>
                     <input type="text" name="email" required
-                           class="w-full px-4 py-3 border border-gray-300 rounded bg-white text-black focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                           placeholder="Enter your username or email">
+                           value="<?php echo h($remembered_username); ?>"
+                           class="w-full px-4 py-3 border border-gray-300 rounded bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                           placeholder="Enter your username">
                 </div>
 
                 <!-- Password -->
                 <div>
-                    <label class="block text-white text-sm mb-2">Password</label>
+                    <label class="block text-white text-sm mb-1">Password</label>
                     <div class="relative">
                         <input type="password" name="password" id="password" required autocomplete="current-password"
-                               class="w-full px-4 py-3 pr-10 border border-gray-300 rounded bg-white text-black focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                               placeholder="Enter your password">
+                               class="w-full px-4 py-3 pr-10 border border-gray-300 rounded bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                               placeholder="***********">
                         
                         <button type="button"
                                 onmousedown="event.preventDefault(); togglePassword();"
                                 ontouchstart="event.preventDefault(); togglePassword();"
-                                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-800 transition-colors duration-150 focus:outline-none select-none">
+                                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-900 hover:text-black transition-colors duration-150 focus:outline-none select-none">
                             <!-- Eye (password hidden) -->
                             <svg id="icon-eye" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
                             <!-- Eye-off (password visible) -->
@@ -148,18 +170,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
 
-                <!-- Back -->
-                <div class="flex items-center justify-end text-sm">
-                    <a href="<?php echo h(app_url('index.php')); ?>" class="text-white hover:underline">
-                        Back to Role Select
+                <!-- Remember Me & Forgot Password -->
+                <div class="flex items-center justify-between text-sm mt-2">
+                    <label class="flex items-center text-white cursor-pointer hover:text-gray-200">
+                        <input type="checkbox" name="remember_me" class="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500" <?php echo $remembered_username !== '' ? 'checked' : ''; ?>>
+                        Remember Me
+                    </label>
+                    <a href="#" class="text-white hover:underline hover:text-gray-200" onclick="alert('Please contact an administrator to reset your password.'); return false;">
+                        Forgot Password
                     </a>
                 </div>
 
                 <!-- Submit Button -->
-                <button type="submit"
-                        class="w-full bg-white text-black font-bold py-3 px-6 rounded-full border border-black hover:bg-gray-100 transition-colors text-base">
-                    Login &rightarrow;
-                </button>
+                <div class="flex justify-center mt-8">
+                    <button type="submit"
+                            class="bg-white text-black font-bold py-2 px-6 rounded flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors text-sm shadow-md">
+                        Login
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </button>
+                </div>
             </form>
         </div>
     </div>

@@ -8,6 +8,7 @@ require_once '../includes/domain.php';
 require_login();
 
 $canManage = can_manage_catalog();
+$canDelete = can_delete_catalog();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$canManage) {
@@ -30,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $compatibility = trim((string) ($_POST['compatibility'] ?? ''));
             $currentStock = max(0, (int) ($_POST['current_stock'] ?? 0));
             $minStockLevel = max(0, (int) ($_POST['min_stock_level'] ?? 0));
+            $expiryDate = !empty($_POST['expiry_date']) ? $_POST['expiry_date'] : null;
 
             if ($productName === '') {
                 throw new RuntimeException('Product name is required.');
@@ -81,13 +83,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $productId = (int) $pdo->lastInsertId();
 
                 $insertInventory = $pdo->prepare(
-                    'INSERT INTO Inventory (product_id, current_stock, min_stock_level)
-                     VALUES (:product_id, :current_stock, :min_stock_level)'
+                    'INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date)
+                     VALUES (:product_id, :current_stock, :min_stock_level, :expiry_date)'
                 );
                 $insertInventory->execute([
                     'product_id' => $productId,
                     'current_stock' => $currentStock,
                     'min_stock_level' => $minStockLevel,
+                    'expiry_date' => $expiryDate,
                 ]);
 
                 set_flash('success', 'Product created successfully.');
@@ -123,23 +126,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($inventoryRow) {
                     $updateInventory = $pdo->prepare(
                         'UPDATE Inventory
-                         SET current_stock = :current_stock, min_stock_level = :min_stock_level
+                         SET current_stock = :current_stock, min_stock_level = :min_stock_level, expiry_date = :expiry_date
                          WHERE product_id = :product_id'
                     );
                     $updateInventory->execute([
                         'current_stock' => $currentStock,
                         'min_stock_level' => $minStockLevel,
+                        'expiry_date' => $expiryDate,
                         'product_id' => $productId,
                     ]);
                 } else {
                     $insertInventory = $pdo->prepare(
-                        'INSERT INTO Inventory (product_id, current_stock, min_stock_level)
-                         VALUES (:product_id, :current_stock, :min_stock_level)'
+                        'INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date)
+                         VALUES (:product_id, :current_stock, :min_stock_level, :expiry_date)'
                     );
                     $insertInventory->execute([
                         'product_id' => $productId,
                         'current_stock' => $currentStock,
                         'min_stock_level' => $minStockLevel,
+                        'expiry_date' => $expiryDate,
                     ]);
                 }
 
@@ -150,6 +155,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sync_feature_matches_for_catalog($pdo);
             $pdo->commit();
         } elseif (isset($_POST['delete_product'])) {
+            if (!$canDelete) {
+                throw new RuntimeException('You do not have permission to delete products.');
+            }
             $productId = (int) ($_POST['product_id'] ?? 0);
             if ($productId <= 0) {
                 throw new RuntimeException('Invalid product selected.');
@@ -192,7 +200,8 @@ $productsQuery = "
         p.*,
         c.category_name,
         COALESCE(i.current_stock, 0) AS current_stock,
-        COALESCE(i.min_stock_level, 0) AS min_stock_level
+        COALESCE(i.min_stock_level, 0) AS min_stock_level,
+        i.expiry_date
     FROM Products p
     LEFT JOIN Category c ON p.category_id = c.category_id
     LEFT JOIN Inventory i ON p.product_id = i.product_id
@@ -316,10 +325,12 @@ include '../includes/header.php';
                             data-compatibility="<?php echo h($product['compatibility']); ?>"
                             data-current-stock="<?php echo h((string) $currentStock); ?>"
                             data-min-stock-level="<?php echo h((string) $minStockLevel); ?>"
+                            data-expiry-date="<?php echo h($product['expiry_date'] ?? ''); ?>"
                             onclick="openEditProductModal(this)"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                         </button>
+                        <?php if ($canDelete): ?>
                         <button
                             type="button"
                             title="Delete product"
@@ -330,6 +341,7 @@ include '../includes/header.php';
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                         </button>
+                        <?php endif; ?>
                     <?php else: ?>
                         <!-- view-only: no action buttons -->
                     <?php endif; ?>
@@ -374,6 +386,7 @@ include '../includes/header.php';
             </form>
         </div>
     </div>
+    <?php if ($canDelete): ?>
     <div id="deleteProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
             <div class="mb-4 flex items-center justify-between border-b pb-3">
@@ -391,6 +404,7 @@ include '../includes/header.php';
             </form>
         </div>
     </div>
+    <?php endif; ?>
 <?php endif; ?>
 
 <script>
@@ -422,6 +436,7 @@ include '../includes/header.php';
         document.getElementById('edit_compatibility').value = button.dataset.compatibility || '';
         document.getElementById('edit_current_stock').value = button.dataset.currentStock || '';
         document.getElementById('edit_min_stock_level').value = button.dataset.minStockLevel || '';
+        document.getElementById('edit_expiry_date').value = button.dataset.expiryDate || '';
         toggleProductModal('editProductModal', true);
     }
 

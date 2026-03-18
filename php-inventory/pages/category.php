@@ -8,6 +8,7 @@ require_once '../includes/domain.php';
 require_login();
 
 $canManage = can_manage_catalog();
+$canDelete = can_delete_catalog();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$canManage) {
@@ -35,6 +36,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             set_flash('success', 'Category created successfully.');
         } elseif (isset($_POST['delete_category'])) {
+            if (!$canDelete) {
+                throw new RuntimeException('You do not have permission to delete categories.');
+            }
             $categoryId = (int) ($_POST['category_id'] ?? 0);
             if ($categoryId <= 0) {
                 throw new RuntimeException('Invalid category selected.');
@@ -128,7 +132,7 @@ include '../includes/header.php';
                 <div><?php echo h(date('F d, Y h:i A', strtotime((string) $category['created_at']))); ?></div>
                 <div>
                     <span class="inline-flex rounded-full px-2 py-1 text-xs font-semibold <?php echo $catIsActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
-                        <?php echo $catIsActive ? 'Active' : 'Inactive'; ?>
+                        <?php echo $catIsActive ? 'Instock' : 'No stock'; ?>
                     </span>
                 </div>
                 <div class="flex gap-2">
@@ -142,6 +146,7 @@ include '../includes/header.php';
                             class="rounded bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100">
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                         </button>
+                        <?php if ($canDelete): ?>
                         <button type="button"
                             data-category-id="<?php echo h((string) $category['category_id']); ?>"
                             data-category-name="<?php echo h($category['category_name']); ?>"
@@ -151,6 +156,7 @@ include '../includes/header.php';
                             class="rounded bg-red-50 p-1.5 text-red-700 hover:bg-red-100">
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                         </button>
+                        <?php endif; ?>
                     <?php else: ?>
                         <span class="text-xs uppercase tracking-wide text-gray-500">View Only</span>
                     <?php endif; ?>
@@ -190,7 +196,7 @@ include '../includes/header.php';
                 </div>
                 <div class="mb-4 flex items-center gap-3 rounded border px-3 py-2">
                     <input type="checkbox" name="is_active" id="edit_category_is_active" value="1" class="h-4 w-4 rounded border-gray-300">
-                    <label for="edit_category_is_active" class="text-sm font-medium cursor-pointer select-none">Category is Active</label>
+                    <label for="edit_category_is_active" class="text-sm font-medium cursor-pointer select-none">Category is Instock</label>
                 </div>
                 <div class="flex justify-end gap-2">
                     <button type="button" onclick="toggleCategoryModal('editModal', false)" class="rounded border px-4 py-2 hover:bg-gray-50">Cancel</button>
@@ -199,6 +205,7 @@ include '../includes/header.php';
             </form>
         </div>
     </div>
+    <?php if ($canDelete): ?>
     <div id="deleteModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
             <div class="mb-4 flex items-start gap-3">
@@ -221,6 +228,7 @@ include '../includes/header.php';
             </form>
         </div>
     </div>
+    <?php endif; ?>
 <?php endif; ?>
 
 <script>

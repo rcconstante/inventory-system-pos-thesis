@@ -25,6 +25,10 @@ if ($currentUser === null) {
 
 try {
     if ($settingsAction === 'update_password') {
+        if ((int) current_role_id() !== APP_ROLE_ADMIN) {
+            throw new RuntimeException('Only Administrators are allowed to change passwords.');
+        }
+
         $currentPassword = (string) ($_POST['current_password'] ?? '');
         $newPassword = (string) ($_POST['new_password'] ?? '');
         $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
