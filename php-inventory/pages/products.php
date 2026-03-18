@@ -201,10 +201,16 @@ $productsQuery = "
         c.category_name,
         COALESCE(i.current_stock, 0) AS current_stock,
         COALESCE(i.min_stock_level, 0) AS min_stock_level,
-        i.expiry_date
+        i.expiry_date,
+        COALESCE(si.sales_count, 0) AS sales_count
     FROM Products p
     LEFT JOIN Category c ON p.category_id = c.category_id
     LEFT JOIN Inventory i ON p.product_id = i.product_id
+    LEFT JOIN (
+        SELECT product_id, SUM(quantity) as sales_count 
+        FROM Sale_Item 
+        GROUP BY product_id
+    ) si ON p.product_id = si.product_id
 ";
 
 if ($selectedCategoryId > 0) {
@@ -247,108 +253,108 @@ include '../includes/header.php';
     <?php endif; ?>
 </div>
 
-<div class="overflow-hidden rounded-lg border border-black">
-    <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-sm font-medium">
-        <div class="col-span-2">PRODUCT</div>
-        <div>CATEGORY</div>
-        <div>BRAND</div>
-        <div>PRICE</div>
-        <div>IN STOCK</div>
-        <div>STATUS</div>
-    </div>
+<div class="overflow-x-auto bg-white mb-8">
+    <table class="w-full border-collapse border border-black text-sm">
+        <thead>
+            <tr class="text-sm font-bold uppercase text-gray-700">
+                <th class="border border-black p-4 w-[100px] text-center">PRODUCT ID</th>
+                <th class="border border-black p-4 text-left">PRODUCTS</th>
+                <th class="border border-black p-4 text-center">CATEGORY</th>
+                <th class="border border-black p-4 text-center">PRICE</th>
+                <th class="border border-black p-4 text-center w-[130px]">EXP DATE</th>
+                <th class="border border-black p-4 text-center w-[90px]">STOCK</th>
+                <th class="border border-black p-4 text-center w-[110px]">SALES COUNT</th>
+                <th class="border border-black p-4 text-center w-[150px]">STATUS</th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php if ($products === []): ?>
+            <tr>
+                <td colspan="8" class="border border-black p-8 text-center text-gray-500">No products found.</td>
+            </tr>
+        <?php else: ?>
+            <?php foreach ($products as $product): ?>
+                <?php
+                $productId = (int) $product['product_id'];
+                $currentStock = (int) $product['current_stock'];
+                $minStockLevel = (int) $product['min_stock_level'];
+                $salesCount = (int) ($product['sales_count'] ?? 0);
+                
+                if ($salesCount >= 50) {
+                    $statusLabel = 'FAST MOVING';
+                } else {
+                    $statusLabel = 'SLOW MOVING';
+                }
 
-    <?php if ($products === []): ?>
-        <div class="p-4 text-center text-sm text-gray-500">No products found.</div>
-    <?php else: ?>
-        <?php foreach ($products as $product): ?>
-            <?php
-            $productId = (int) $product['product_id'];
-            $currentStock = (int) $product['current_stock'];
-            $minStockLevel = (int) $product['min_stock_level'];
-            $statusLabel = 'In Stock';
-            $statusClasses = 'bg-green-100 text-green-700';
-
-            if ($currentStock === 0) {
-                $statusLabel = 'Out of Stock';
-                $statusClasses = 'bg-red-100 text-red-700';
-            } elseif ($minStockLevel > 0 && $currentStock <= $minStockLevel) {
-                $statusLabel = 'Critical';
-                $statusClasses = 'bg-red-100 text-red-700';
-            } elseif ($minStockLevel > 0 && $currentStock <= ($minStockLevel + 5)) {
-                $statusLabel = 'Low';
-                $statusClasses = 'bg-yellow-100 text-yellow-700';
-            }
-
-            $productRecommendations = $recommendations[$productId] ?? [];
-            $topRecommendation = $productRecommendations[0] ?? null;
-            ?>
-            <div class="grid grid-cols-7 gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
-                <div class="col-span-2">
-                    <div class="font-medium"><?php echo h($product['product_name']); ?></div>
-                    <div class="mt-1 text-xs text-gray-500">
-                        <?php echo h($product['product_type'] !== '' ? $product['product_type'] : 'General product'); ?>
-                        <?php if ($product['compatibility'] !== ''): ?>
-                            <span class="mx-1">|</span>
-                            <?php echo h($product['compatibility']); ?>
-                        <?php endif; ?>
-                    </div>
-                    <?php if ($topRecommendation): ?>
-                        <div class="mt-2 text-xs text-blue-600">
-                            Alt: <?php echo h($topRecommendation['alternative_name']); ?> (<?php echo h($topRecommendation['matched_attribute']); ?>)
+                $productRecommendations = $recommendations[$productId] ?? [];
+                $topRecommendation = $productRecommendations[0] ?? null;
+                ?>
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="border border-black p-4 text-center font-medium">
+                        P<?php echo str_pad((string)$productId, 3, '0', STR_PAD_LEFT); ?>
+                    </td>
+                    <td class="border border-black p-4 text-left">
+                        <div class="font-medium text-black"><?php echo h($product['product_name']); ?></div>
+                        <div class="mt-1 text-xs text-gray-500">
+                            <?php echo h($product['product_type'] !== '' ? $product['product_type'] : 'General product'); ?>
+                            <?php if ($product['compatibility'] !== ''): ?>
+                                <span class="mx-1">|</span>
+                                <?php echo h($product['compatibility']); ?>
+                            <?php endif; ?>
                         </div>
-                    <?php endif; ?>
-                </div>
-                <div><?php echo h($product['category_name'] ?? 'N/A'); ?></div>
-                <div><?php echo h($product['brand'] !== '' ? $product['brand'] : 'N/A'); ?></div>
-                <div><?php echo h(money_format_php((float) $product['price'])); ?></div>
-                <div>
-                    <div><?php echo h((string) $currentStock); ?></div>
-                    <div class="mt-1 text-xs text-gray-500">Min: <?php echo h((string) $minStockLevel); ?></div>
-                </div>
-                <div class="flex flex-wrap items-start gap-2">
-                    <span class="inline-flex rounded-full px-2 py-1 text-xs font-semibold <?php echo $statusClasses; ?>">
-                        <?php echo h($statusLabel); ?>
-                    </span>
-                    <?php if ($canManage): ?>
-                        <button
-                            type="button"
-                            title="Edit product"
-                            class="rounded bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100"
-                            data-product-id="<?php echo h((string) $productId); ?>"
-                            data-product-name="<?php echo h($product['product_name']); ?>"
-                            data-category-id="<?php echo h((string) $product['category_id']); ?>"
-                            data-brand="<?php echo h($product['brand']); ?>"
-                            data-description="<?php echo h($product['description']); ?>"
-                            data-price="<?php echo h((string) $product['price']); ?>"
-                            data-product-type="<?php echo h($product['product_type']); ?>"
-                            data-specification="<?php echo h($product['specification']); ?>"
-                            data-compatibility="<?php echo h($product['compatibility']); ?>"
-                            data-current-stock="<?php echo h((string) $currentStock); ?>"
-                            data-min-stock-level="<?php echo h((string) $minStockLevel); ?>"
-                            data-expiry-date="<?php echo h($product['expiry_date'] ?? ''); ?>"
-                            onclick="openEditProductModal(this)"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                        </button>
-                        <?php if ($canDelete): ?>
-                        <button
-                            type="button"
-                            title="Delete product"
-                            class="rounded bg-red-50 p-1.5 text-red-700 hover:bg-red-100"
-                            data-product-id="<?php echo h((string) $productId); ?>"
-                            data-product-name="<?php echo h($product['product_name']); ?>"
-                            onclick="openDeleteProductModal(this)"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                        </button>
-                        <?php endif; ?>
-                    <?php else: ?>
-                        <!-- view-only: no action buttons -->
-                    <?php endif; ?>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    <?php endif; ?>
+                    </td>
+                    <td class="border border-black p-4 text-center text-black"><?php echo h($product['category_name'] ?? 'N/A'); ?></td>
+                    <td class="border border-black p-4 text-center text-black"><?php echo h(money_format_php((float) $product['price'])); ?></td>
+                    <td class="border border-black p-4 text-center text-black"><?php echo h($product['expiry_date'] ? date('F d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
+                    <td class="border border-black p-4 text-center text-black"><?php echo h((string) $currentStock); ?></td>
+                    <td class="border border-black p-4 text-center text-black"><?php echo h((string) $salesCount); ?></td>
+                    <td class="border border-black p-4 text-center text-black">
+                        <div class="text-xs font-semibold uppercase flex flex-col items-center justify-center gap-2">
+                            <span><?php echo h($statusLabel); ?></span>
+                            
+                            <?php if ($canManage): ?>
+                                <div class="flex gap-1 justify-center">
+                                    <button
+                                        type="button"
+                                        title="Edit product"
+                                        class="rounded bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100"
+                                        data-product-id="<?php echo h((string) $productId); ?>"
+                                        data-product-name="<?php echo h($product['product_name']); ?>"
+                                        data-category-id="<?php echo h((string) $product['category_id']); ?>"
+                                        data-brand="<?php echo h($product['brand']); ?>"
+                                        data-description="<?php echo h($product['description']); ?>"
+                                        data-price="<?php echo h((string) $product['price']); ?>"
+                                        data-product-type="<?php echo h($product['product_type']); ?>"
+                                        data-specification="<?php echo h($product['specification']); ?>"
+                                        data-compatibility="<?php echo h($product['compatibility']); ?>"
+                                        data-current-stock="<?php echo h((string) $currentStock); ?>"
+                                        data-min-stock-level="<?php echo h((string) $minStockLevel); ?>"
+                                        data-expiry-date="<?php echo h($product['expiry_date'] ?? ''); ?>"
+                                        onclick="openEditProductModal(this)"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                    </button>
+                                    <?php if ($canDelete): ?>
+                                    <button
+                                        type="button"
+                                        title="Delete product"
+                                        class="rounded bg-red-50 p-1.5 text-red-700 hover:bg-red-100"
+                                        data-product-id="<?php echo h((string) $productId); ?>"
+                                        data-product-name="<?php echo h($product['product_name']); ?>"
+                                        onclick="openDeleteProductModal(this)"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                    </button>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        <?php endif; ?>
+        </tbody>
+    </table>
 </div>
 
 <?php if ($canManage): ?>

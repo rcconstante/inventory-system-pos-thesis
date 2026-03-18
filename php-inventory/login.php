@@ -68,6 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         input[type="text"]::-ms-clear { display: none !important; }
         input::-webkit-strong-password-auto-fill-button { display: none !important; }
     </style>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%234338ca' rx='20'/%3E%3Ctext x='50' y='70' fill='white' font-family='Arial, sans-serif' font-size='60' font-weight='bold' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E">
 </head>
 <body class="min-h-screen bg-white flex items-center justify-center p-4">
 
@@ -108,23 +109,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             <?php endif; ?>
 
-            <?php if ($flashMessages !== []): ?>
-                <div class="mb-4 w-full max-w-md space-y-2">
-                    <?php foreach ($flashMessages as $flashMessage): ?>
-                        <?php
-                        $type = $flashMessage['type'] ?? 'info';
-                        $classes = match ($type) {
-                            'success' => 'bg-green-500',
-                            'error' => 'bg-red-500',
-                            'warning' => 'bg-yellow-500 text-black',
-                            default => 'bg-blue-500',
-                        };
-                        ?>
-                        <div class="rounded p-3 text-center text-sm text-white <?php echo $classes; ?>">
-                            <?php echo h($flashMessage['message'] ?? ''); ?>
+            <!-- Toast Notifications Container -->
+            <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+            
+            <script>
+                function showToast(message, type = 'info') {
+                    const container = document.getElementById('toast-container');
+                    
+                    const bgColors = {
+                        'success': 'bg-white border-l-4 border-green-500 text-gray-800',
+                        'error': 'bg-white border-l-4 border-red-500 text-gray-800',
+                        'warning': 'bg-white border-l-4 border-yellow-500 text-gray-800',
+                        'info': 'bg-white border-l-4 border-blue-500 text-gray-800'
+                    };
+                    
+                    const icons = {
+                        'success': '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+                        'error': '<svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
+                        'warning': '<svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
+                        'info': '<svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+                    };
+
+                    const toast = document.createElement('div');
+                    toast.className = `flex items-center p-4 mb-2 shadow-lg rounded-md transition-all duration-300 transform translate-x-full opacity-0 ${bgColors[type] || bgColors['info']}`;
+                    
+                    toast.innerHTML = `
+                        <div class="inline-flex items-center justify-center shrink-0">
+                            ${icons[type] || icons['info']}
                         </div>
-                    <?php endforeach; ?>
-                </div>
+                        <div class="mx-3 text-sm font-medium">
+                            ${message}
+                        </div>
+                        <button type="button" class="ml-auto -mx-1.5 -my-1.5 text-gray-400 hover:text-gray-900 rounded-lg focus:ring-2 focus:ring-gray-300 p-1.5 hover:bg-gray-100 inline-flex items-center justify-center h-8 w-8" onclick="this.parentElement.remove()">
+                            <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14">
+                                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/>
+                            </svg>
+                        </button>
+                    `;
+                    
+                    container.appendChild(toast);
+                    
+                    requestAnimationFrame(() => {
+                        toast.classList.remove('translate-x-full', 'opacity-0');
+                    });
+                    
+                    setTimeout(() => {
+                        toast.classList.add('translate-x-full', 'opacity-0');
+                        setTimeout(() => toast.remove(), 300);
+                    }, 3000);
+                }
+            </script>
+
+            <?php if ($flashMessages !== []): ?>
+                <script>
+                    (function() {
+                        const runToasts = () => {
+                            <?php foreach ($flashMessages as $flashMessage): ?>
+                                showToast("<?php echo addslashes(h($flashMessage['message'] ?? '')); ?>", "<?php echo addslashes(h($flashMessage['type'] ?? 'info')); ?>");
+                            <?php endforeach; ?>
+                        };
+                        if (document.readyState === 'loading') {
+                            document.addEventListener('DOMContentLoaded', runToasts);
+                        } else {
+                            runToasts();
+                        }
+                    })();
+                </script>
             <?php endif; ?>
 
             <!-- Form -->

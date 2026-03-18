@@ -134,30 +134,20 @@ include '../includes/header.php';
 <h2 class="mb-8 text-2xl font-normal text-black">WELCOME TO FIVE BROTHERS TRADING</h2>
 
 <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
-    <div class="flex flex-col justify-center rounded-lg bg-gradient-to-r from-[#0AC074] to-[#00D4B4] p-8 text-white h-32">
+    <div class="flex flex-col items-center justify-center rounded-lg bg-[#8E9CFF] p-8 text-black text-center shadow-sm h-32">
         <p class="text-lg font-normal mb-1">Daily Transaction (Today)</p>
-        <p class="text-4xl font-bold"><?php echo h((string) $totalTransactions); ?></p>
+        <p class="text-3xl font-bold"><?php echo h((string) $totalTransactions); ?></p>
     </div>
 
-    <div class="flex flex-col justify-center rounded-lg bg-gradient-to-r from-[#0065FF] to-[#4B9FFF] p-8 text-white h-32">
+    <div class="flex flex-col items-center justify-center rounded-lg bg-[#4CD995] p-8 text-black text-center shadow-sm h-32">
         <p class="text-lg font-normal mb-1">Daily Sales (Today)</p>
-        <p class="text-4xl font-bold">P<?php echo h(money_format_php((float) $summary['daily_sales'])); ?></p>
+        <p class="text-3xl font-bold">P<?php echo h(money_format_php((float) $summary['daily_sales'])); ?></p>
     </div>
 </div>
 
 <div>
     <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h3 class="text-base font-bold">TODAY'S TRANSACTION</h3>
-
-        <form method="GET" class="flex items-center gap-2 text-sm">
-            <span>Show</span>
-            <select name="per_page" onchange="this.form.submit()" class="rounded border border-black px-3 py-2 text-sm">
-                <?php foreach ([10, 25, 50] as $option): ?>
-                    <option value="<?php echo h((string) $option); ?>" <?php echo $perPage === $option ? 'selected' : ''; ?>><?php echo h((string) $option); ?></option>
-                <?php endforeach; ?>
-            </select>
-            <span>entries</span>
-        </form>
     </div>
 
     <div class="overflow-hidden rounded-lg border border-black">
@@ -185,7 +175,7 @@ include '../includes/header.php';
                     'items' => $items
                 ]);
             ?>
-                <div onclick="openReceiptModal(<?php echo h(htmlspecialchars($jsonSale, ENT_QUOTES, 'UTF-8')); ?>)" class="grid grid-cols-4 gap-4 border-b border-black p-4 text-sm last:border-b-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <div onclick="openReceiptModal(<?php echo htmlspecialchars($jsonSale, ENT_QUOTES, 'UTF-8'); ?>)" class="grid grid-cols-4 gap-4 border-b border-black p-4 text-sm last:border-b-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <div>#<?php echo h((string) $transaction['sale_id']); ?></div>
                     <div><?php echo h((string) $transaction['payment_method']); ?></div>
                     <div>P<?php echo h(money_format_php((float) $transaction['total_amount'])); ?></div>
@@ -200,9 +190,14 @@ include '../includes/header.php';
     <div class="mt-6 flex justify-end gap-3">
         <?php if ($transactionPage > 1): ?>
             <a href="?page=<?php echo h((string) ($transactionPage - 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Previous</a>
+        <?php else: ?>
+            <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Previous</button>
         <?php endif; ?>
+
         <?php if ($transactionPage < $totalPages): ?>
             <a href="?page=<?php echo h((string) ($transactionPage + 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Next</a>
+        <?php else: ?>
+            <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Next</button>
         <?php endif; ?>
     </div>
 </div>

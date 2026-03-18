@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'qty' => $requestedTotalQuantity,
             ];
             
-            // Flash message removed to prevent UI break
+            set_flash('success', 'Product added to cart.');
         } elseif (isset($_POST['add_multiple_to_cart'])) {
             $productIds = $_POST['selected_products'] ?? [];
             if (!is_array($productIds) || empty($productIds)) {
@@ -97,6 +97,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $addedCount++;
                     }
                 }
+            }
+            
+            if ($addedCount > 0) {
+                set_flash('success', "$addedCount product(s) added to cart.");
             }
             
             $redirectUrl = 'pos.php' . (isset($_GET['q']) ? '?q=' . urlencode($_GET['q']) : '');
@@ -132,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (isset($_POST['remove_cart_item'])) {
             $productId = (int) ($_POST['product_id'] ?? 0);
             unset($_SESSION['cart'][$productId]);
-            // Flash message removed
+            set_flash('success', 'Product removed from cart.');
         } elseif (isset($_POST['checkout'])) {
             if ($_SESSION['cart'] === []) {
                 throw new RuntimeException('Add at least one item to the cart before checkout.');
@@ -700,5 +704,104 @@ include '../includes/header.php';
     </div>
 </div>
 <?php endif; ?>
+
+<script>
+    // AJAX Form Submission Interceptor for POS 
+    document.addEventListener('DOMContentLoaded', () => {
+        document.body.addEventListener('submit', async (e) => {
+            const form = e.target;
+            // Intercept standard POS operations (adding, updating, removing cart items)
+            if (form.closest('#pos-main-view') || form.closest('.w-\\[400px\\]') || document.querySelector('#pos-main-view')) {
+                const method = (form.method || 'GET').toUpperCase();
+                
+                // Allow GET forms (like search) to proceed normally so URL updates
+                if (method === 'GET') {
+                    return;
+                }
+                
+                const submitter = e.submitter;
+                // Allow Checkout to proceed natively to enable redirect/receipt displays
+                if (submitter && submitter.name === 'checkout') {
+                    return;
+                }
+
+                e.preventDefault();
+                const formData = new FormData(form);
+                if (submitter && submitter.name) {
+                    formData.append(submitter.name, submitter.value);
+                }
+
+                // Save user state
+                const activeId = document.activeElement ? document.activeElement.id : null;
+                const activeName = document.activeElement ? document.activeElement.name : null;
+                const scrollableLists = document.querySelectorAll('.overflow-auto');
+                const scrollStates = Array.from(scrollableLists).map(el => el.scrollTop);
+
+                // Preserve UI visual states manually because AJAX resets DOM
+                const isCartModalOpen = !document.getElementById('cartModal')?.classList.contains('hidden');
+                const isSpecsModalOpen = !document.getElementById('specsModal')?.classList.contains('hidden');
+                const isCheckoutViewOpen = !document.getElementById('pos-checkout-view')?.classList.contains('hidden');
+                
+                try {
+                    const response = await fetch(form.action || window.location.href, {
+                        method: 'POST',
+                        body: formData,
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+
+                    if (response.ok) {
+                        const html = await response.text();
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+
+                        document.body.innerHTML = doc.body.innerHTML;
+
+                        // Re-apply preserved modal states
+                        if (isCartModalOpen) {
+                            document.getElementById('cartModal')?.classList.remove('hidden');
+                            document.getElementById('cartModal')?.classList.add('flex');
+                        }
+                        if (isSpecsModalOpen) {
+                            document.getElementById('specsModal')?.classList.remove('hidden');
+                            document.getElementById('specsModal')?.classList.add('flex');
+                        }
+                        if (isCheckoutViewOpen) {
+                            document.getElementById('pos-checkout-view')?.classList.remove('hidden');
+                            document.getElementById('pos-checkout-view')?.classList.add('flex');
+                            document.getElementById('pos-main-view')?.classList.add('hidden');
+                            document.getElementById('pos-main-view')?.classList.remove('flex');
+                        }
+                            Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                            newScript.appendChild(document.createTextNode(oldScript.innerHTML));
+                            oldScript.parentNode.replaceChild(newScript, oldScript);
+                        });
+
+                        // Restore scroll areas
+                        const newScrollableLists = document.querySelectorAll('.overflow-auto');
+                        newScrollableLists.forEach((el, index) => {
+                            if (scrollStates[index] !== undefined) {
+                                el.scrollTop = scrollStates[index];
+                            }
+                        });
+
+                        // Restore focus
+                        let elToFocus = null;
+                        if (activeId) elToFocus = document.getElementById(activeId);
+                        else if (activeName) elToFocus = document.querySelector(`[name="${activeName}"]`);
+                        
+                        if (elToFocus) {
+                            elToFocus.focus();
+                        }
+                    } else {
+                        form.submit();
+                    }
+                } catch (error) {
+                    console.error('AJAX Intercept failed:', error);
+                    form.submit();
+                }
+            }
+        });
+    });
+</script>
 
 <?php include '../includes/footer.php'; ?>
