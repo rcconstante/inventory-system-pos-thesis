@@ -308,9 +308,15 @@ foreach ($cart as $item) {
 $flatRecommendations = [];
 foreach ($recommendations as $recList) {
     foreach ($recList as $rec) {
-        $flatRecommendations[$rec['alternative_id']] = $rec;
+        $altId = (int) $rec['alternative_id'];
+        // Keep only the highest similarity_score when the same alternative appears for multiple source products
+        if (!isset($flatRecommendations[$altId]) || (float) $rec['similarity_score'] > (float) $flatRecommendations[$altId]['similarity_score']) {
+            $flatRecommendations[$altId] = $rec;
+        }
     }
 }
+// Sort by best similarity score so the most relevant alternatives appear first
+uasort($flatRecommendations, static fn (array $a, array $b): int => (float) $b['similarity_score'] <=> (float) $a['similarity_score']);
 
 // Check for receipt modal
 $receiptSale = null;

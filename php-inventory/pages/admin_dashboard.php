@@ -30,12 +30,24 @@ $fastMovingStatement = $pdo->query(
 );
 $fastMovingProducts = $fastMovingStatement->fetchAll(PDO::FETCH_ASSOC);
 
-// Slow Moving Products
+// Slow Moving Products (exclude products already in the fast-moving top 4)
 $slowMovingStatement = $pdo->query(
     "SELECT p.product_name, COALESCE(SUM(si.quantity), 0) as total_sold
      FROM Products p
      LEFT JOIN Sale_Item si ON p.product_id = si.product_id
      LEFT JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
+     WHERE p.product_id NOT IN (
+         SELECT product_id FROM (
+             SELECT p2.product_id
+             FROM Sale_Item si2
+             JOIN Products p2 ON si2.product_id = p2.product_id
+             JOIN Sale s2 ON si2.sale_id = s2.sale_id
+             WHERE s2.status = 'COMPLETED'
+             GROUP BY p2.product_id
+             ORDER BY SUM(si2.quantity) DESC
+             LIMIT 4
+         ) AS fast_movers
+     )
      GROUP BY p.product_id
      ORDER BY total_sold ASC, p.product_name ASC
      LIMIT 4"

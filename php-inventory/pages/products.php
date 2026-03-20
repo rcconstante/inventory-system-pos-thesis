@@ -207,9 +207,10 @@ $productsQuery = "
     LEFT JOIN Category c ON p.category_id = c.category_id
     LEFT JOIN Inventory i ON p.product_id = i.product_id
     LEFT JOIN (
-        SELECT product_id, SUM(quantity) as sales_count 
-        FROM Sale_Item 
-        GROUP BY product_id
+        SELECT si.product_id, SUM(si.quantity) AS sales_count
+        FROM Sale_Item si
+        JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
+        GROUP BY si.product_id
     ) si ON p.product_id = si.product_id
 ";
 
@@ -228,6 +229,10 @@ $products = $productsStatement->fetchAll(PDO::FETCH_ASSOC);
 $recommendations = recommendations_enabled()
     ? fetch_recommendations_for_products($pdo, array_map(static fn (array $product): int => (int) $product['product_id'], $products))
     : [];
+
+// Compute average sales count to classify products relatively (consistent with dashboard ranking)
+$allSalesCounts = array_map(static fn (array $p): int => (int) ($p['sales_count'] ?? 0), $products);
+$avgSalesCount = count($allSalesCounts) > 0 ? array_sum($allSalesCounts) / count($allSalesCounts) : 0;
 
 $page_title = 'PRODUCTS';
 include '../includes/header.php';
@@ -280,11 +285,8 @@ include '../includes/header.php';
                 $minStockLevel = (int) $product['min_stock_level'];
                 $salesCount = (int) ($product['sales_count'] ?? 0);
                 
-                if ($salesCount >= 50) {
-                    $statusLabel = 'FAST MOVING';
-                } else {
-                    $statusLabel = 'SLOW MOVING';
-                }
+                // Classify relative to the average across displayed products (consistent with dashboard ranking)
+                $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
 
                 $productRecommendations = $recommendations[$productId] ?? [];
                 ?>
