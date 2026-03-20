@@ -5,7 +5,7 @@ require_once '../includes/app.php';
 require_once '../includes/config.php';
 require_once '../includes/domain.php';
 
-require_login([APP_ROLE_ADMIN, APP_ROLE_CASHIER]);
+require_login([APP_ROLE_CASHIER]);
 
 if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
@@ -279,8 +279,10 @@ $productQuery = "
 
 $productParameters = [];
 if ($searchTerm !== '') {
-    $productQuery .= ' AND (p.product_name LIKE :search_term OR p.brand LIKE :search_term OR p.compatibility LIKE :search_term)';
-    $productParameters['search_term'] = '%' . $searchTerm . '%';
+    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3)';
+    $productParameters['st1'] = '%' . $searchTerm . '%';
+    $productParameters['st2'] = '%' . $searchTerm . '%';
+    $productParameters['st3'] = '%' . $searchTerm . '%';
 }
 
 $productQuery .= ' ORDER BY p.product_name ASC';
@@ -332,9 +334,9 @@ include '../includes/header.php';
 <!-- Main POS View -->
 <div id="pos-main-view" class="<?php echo isset($_GET['checkout']) ? 'hidden' : 'flex'; ?> h-[calc(100vh-140px)] -m-8 font-sans">
     <!-- Main Left side: POS List -->
-    <div class="flex-1 flex flex-col bg-white dark:bg-gray-900 border-r border-black dark:border-gray-700 relative">
+    <div class="flex-1 flex flex-col bg-white dark:bg-gray-900 border-r border-black dark:border-black relative">
         <!-- Search -->
-        <div class="border-b border-black dark:border-gray-700">
+        <div class="border-b border-black dark:border-black">
              <form method="GET" class="relative">
                  <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                      <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-black dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -348,22 +350,22 @@ include '../includes/header.php';
             <form id="pos-form" method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>">
                 <?php echo csrf_field(); ?>
                 <table class="w-full text-left border-collapse">
-                    <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-gray-700 z-10">
+                    <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
                         <tr>
-                            <th class="py-4 px-6 w-12 border-b border-black dark:border-gray-700"></th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">NO.</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PCODE</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRODUCT NAME</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">BRAND</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">CATEGORY</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRICE</th>
+                            <th class="py-4 px-6 w-12 border-b border-black dark:border-black"></th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">NO.</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PCODE</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">CATEGORY</th>
+                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-black dark:divide-gray-700">
+                    <tbody class="divide-y divide-black dark:divide-black">
                         <?php $no = 1; foreach ($products as $product): ?>
                             <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                 <td class="py-4 px-6">
-                                    <input type="checkbox" name="selected_products[]" value="<?php echo h((string)$product['product_id']); ?>" class="w-5 h-5 border-black dark:border-gray-600 rounded-sm focus:ring-black">
+                                    <input type="checkbox" name="selected_products[]" value="<?php echo h((string)$product['product_id']); ?>" class="w-5 h-5 border-black dark:border-black rounded-sm focus:ring-black">
                                 </td>
                                 <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
                                 <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
@@ -380,9 +382,9 @@ include '../includes/header.php';
                 </table>
                 
                 <!-- Bottom Buttons Fixed -->
-                <div class="absolute bottom-0 left-0 right-0 border-t border-black dark:border-gray-700 p-6 flex gap-6 bg-white dark:bg-gray-900 z-20">
-                    <button type="submit" name="add_multiple_to_cart" class="border border-black dark:border-gray-400 rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
-                    <button type="reset" class="border border-black dark:border-gray-400 rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Remove</button>
+                <div class="absolute bottom-0 left-0 right-0 border-t border-black dark:border-black p-6 flex gap-6 bg-white dark:bg-gray-900 z-20">
+                    <button type="submit" name="add_multiple_to_cart" class="border border-black dark:border-black rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
+                    <button type="reset" class="border border-black dark:border-black rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Remove</button>
                 </div>
             </form>
         </div>
@@ -390,30 +392,30 @@ include '../includes/header.php';
     
     <!-- Right side: Recommendations -->
     <div class="w-[450px] flex flex-col bg-white dark:bg-gray-900 flex-shrink-0">
-        <div class="p-6 border-b border-black dark:border-gray-700">
+        <div class="p-6 border-b border-black dark:border-black">
             <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm ?: 'SELECT PRODUCT'); ?></h2>
         </div>
-        <div class="py-3 px-6 border-b border-black dark:border-gray-700">
+        <div class="py-3 px-6 border-b border-black dark:border-black">
             <span class="font-bold text-sm tracking-wide"><?php echo count($flatRecommendations); ?> Featured-Based</span>
         </div>
         
         <div class="flex-1 overflow-auto">
             <table class="w-full text-left border-collapse">
-                <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-gray-700 z-10">
+                <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
                     <tr>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRODUCT NAME</th>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">BRAND</th>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-gray-700">PRICE</th>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
+                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-black dark:divide-gray-700">
+                <tbody class="divide-y divide-black dark:divide-black">
                     <?php if (empty($flatRecommendations)): ?>
                         <tr><td colspan="3" class="py-8 text-center text-gray-500">No recommendations available</td></tr>
                     <?php else: ?>
                         <?php foreach (array_slice($flatRecommendations, 0, 10) as $rec): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
                             <td class="py-4 px-6 text-sm"><?php echo h($rec['alternative_name']); ?></td>
-                            <td class="py-4 px-6 text-sm">N/A</td>
+                            <td class="py-4 px-6 text-sm"><?php echo h($rec['alternative_brand'] ?? 'N/A'); ?></td>
                             <td class="py-4 px-6 text-sm">
                                 <div class="flex items-center justify-between gap-4">
                                     <span><?php echo h((string)round((float)($rec['price'] ?? 0))); ?></span>
@@ -421,8 +423,8 @@ include '../includes/header.php';
                                         <?php echo csrf_field(); ?>
                                         <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                         <input type="hidden" name="qty" value="1">
-                                        <button type="submit" name="add_to_cart" class="border border-black dark:border-gray-500 rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
-                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'])); ?>')" class="border border-black dark:border-gray-500 rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                        <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
+                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'])); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                     </form>
                                 </div>
                             </td>
@@ -437,7 +439,7 @@ include '../includes/header.php';
 
 <!-- Specs Modal -->
 <div id="specsModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
-    <div class="w-[500px] bg-white dark:bg-gray-800 shadow-2xl border border-black dark:border-gray-600 flex flex-col">
+    <div class="w-[500px] bg-white dark:bg-gray-800 shadow-2xl border border-black dark:border-black flex flex-col">
         <div class="p-8">
             <h3 class="text-sm font-bold uppercase mb-4 tracking-wider">COMPATIBILITY</h3>
             <ul class="list-disc list-inside text-sm mb-8 ml-2" id="specsCompatibility">
@@ -448,17 +450,17 @@ include '../includes/header.php';
                 <li>N/A</li>
             </ul>
         </div>
-        <div class="p-6 border-t border-black dark:border-gray-600 flex justify-center gap-6">
-            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-gray-500 rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add & Return POS</button>
-            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-gray-500 rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Back</button>
+        <div class="p-6 border-t border-black dark:border-black flex justify-center gap-6">
+            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add & Return POS</button>
+            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Back</button>
         </div>
     </div>
 </div>
 
 <!-- Cart Modal -->
 <div id="cartModal" class="<?php echo isset($_GET['cart']) ? 'flex' : 'hidden'; ?> fixed inset-0 z-[60] items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-    <div class="w-[600px] bg-white dark:bg-gray-800 border border-black dark:border-gray-600 shadow-2xl flex flex-col">
-        <div class="border-b border-black dark:border-gray-600 py-4 text-center">
+    <div class="w-[600px] bg-white dark:bg-gray-800 border border-black dark:border-black shadow-2xl flex flex-col">
+        <div class="border-b border-black dark:border-black py-4 text-center">
             <h2 class="text-xl font-bold uppercase tracking-widest text-black dark:text-white">CART</h2>
         </div>
         <div class="p-8 flex-1 overflow-auto max-h-[50vh] space-y-8">
@@ -469,14 +471,14 @@ include '../includes/header.php';
                     <div class="flex justify-between items-center text-black dark:text-white">
                         <div>
                             <div class="text-lg font-medium"><?php echo h($item['name']); ?></div>
-                            <div class="text-sm mt-1">Price: ₱<?php echo number_format((float)$item['price'], 2); ?></div>
+                            <div class="text-sm mt-1">Price: &#8369;<?php echo number_format((float)$item['price'], 2); ?></div>
                         </div>
                         <div class="flex items-center gap-6 text-xl">
                             <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
                                 <input type="hidden" name="action" value="decrease">
-                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
+                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
                                     -
                                 </button>
                             </form>
@@ -485,7 +487,7 @@ include '../includes/header.php';
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
                                 <input type="hidden" name="action" value="increase">
-                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
+                                <button type="submit" name="update_cart_qty" class="w-8 h-8 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white pb-1">
                                     +
                                 </button>
                             </form>
@@ -494,22 +496,22 @@ include '../includes/header.php';
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
-        <div class="p-8 flex justify-between items-center text-black dark:text-white border-t border-black dark:border-gray-600">
-            <div class="text-lg font-medium">Subtotal: ₱ <?php echo number_format($totalDue, 2); ?></div>
+        <div class="p-8 flex justify-between items-center text-black dark:text-white border-t border-black dark:border-black">
+            <div class="text-lg font-medium">Subtotal: &#8369; <?php echo number_format($totalDue, 2); ?></div>
             <div class="flex gap-4">
-                <button type="button" onclick="openCheckoutModal()" <?php echo empty($cart) ? 'disabled' : ''; ?> class="border border-black dark:border-gray-500 rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent <?php echo empty($cart) ? 'opacity-50 cursor-not-allowed' : ''; ?>">Check out</button>
-                <button type="button" onclick="closeCartModal()" class="border border-black dark:border-gray-500 rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent">Back</button>
+                <button type="button" onclick="openCheckoutModal()" <?php echo empty($cart) ? 'disabled' : ''; ?> class="border border-black dark:border-black rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent <?php echo empty($cart) ? 'opacity-50 cursor-not-allowed' : ''; ?>">Check out</button>
+                <button type="button" onclick="closeCartModal()" class="border border-black dark:border-black rounded-sm px-8 py-2 text-sm uppercase font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent">Back</button>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Checkout View (In-page) -->
-<div id="pos-checkout-view" class="<?php echo isset($_GET['checkout']) ? 'flex' : 'hidden'; ?> h-[calc(100vh-140px)] -m-8 font-sans bg-white dark:bg-gray-900 text-black dark:text-white border-t border-black dark:border-gray-700">
+<div id="pos-checkout-view" class="<?php echo isset($_GET['checkout']) ? 'flex' : 'hidden'; ?> h-[calc(100vh-140px)] -m-8 font-sans bg-white dark:bg-gray-900 text-black dark:text-white border-t border-black dark:border-black">
     <!-- Left Column: Transaction Details -->
-    <div class="w-[400px] flex-shrink-0 flex flex-col border-r border-black dark:border-gray-700">
+    <div class="w-[400px] flex-shrink-0 flex flex-col border-r border-black dark:border-black">
         <div class="flex-1 overflow-auto pt-8">
-            <h2 class="text-xl font-bold text-center mb-2 tracking-wide">TRANSACTION NO. <?php echo rand(1, 999); ?></h2>
+            <h2 class="text-xl font-bold text-center mb-2 tracking-wide">CHECKOUT PREVIEW</h2>
             <p class="text-sm text-center mb-8">Date: <?php echo date('F d, Y'); ?></p>
             
             <div class="flex justify-between font-bold px-8 mb-4">
@@ -520,16 +522,16 @@ include '../includes/header.php';
                 <?php foreach ($cart as $item): ?>
                     <div class="flex justify-between">
                         <span><?php echo h($item['name']); ?></span>
-                        <span>₱<?php echo number_format((float)$item['price'], 2); ?></span>
+                        <span>&#8369;<?php echo number_format((float)$item['price'], 2); ?></span>
                     </div>
                 <?php endforeach; ?>
             </div>
         </div>
-        <div class="border-t border-black dark:border-gray-700 p-8 flex flex-col gap-3 text-lg font-medium">
+        <div class="border-t border-black dark:border-black p-8 flex flex-col gap-3 text-lg font-medium">
             <div>Total: <?php echo number_format($totalDue, 2); ?></div>
             <div class="flex items-center gap-2">
                 <span>Amount Received:</span>
-                <input type="number" id="amountReceived" class="border border-black dark:border-gray-400 px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
+                <input type="number" id="amountReceived" class="border border-black dark:border-black px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
             </div>
             <div>Change: <span id="changeAmount">0.00</span></div>
         </div>
@@ -540,33 +542,33 @@ include '../includes/header.php';
         <h3 class="text-center text-sm font-bold uppercase mb-8 tracking-wide">SELECT PAYMENT METHOD</h3>
         
         <div class="flex justify-center gap-8 mb-8 w-full max-w-lg">
-            <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="flex-1 border-2 border-black dark:border-gray-400 py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">CASH</button>
-            <button type="button" id="btnGCASH" onclick="setPaymentMethod('GCASH')" class="flex-1 border border-black dark:border-gray-400 py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">GCASH</button>
+            <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="flex-1 border-2 border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">CASH</button>
+            <button type="button" id="btnGCASH" onclick="setPaymentMethod('GCASH')" class="flex-1 border border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">GCASH</button>
         </div>
         
         <div id="refNumberContainer" class="hidden flex-col items-center mb-12 w-full max-w-lg">
             <label class="block text-sm mb-4">If paying via GCASH, enter Reference Number</label>
-            <input type="text" id="referenceNumber" class="w-full border border-black dark:border-gray-400 px-4 py-3 bg-transparent focus:outline-none">
+            <input type="text" id="referenceNumber" class="w-full border border-black dark:border-black px-4 py-3 bg-transparent focus:outline-none">
         </div>
         
         <div class="flex flex-col items-center mb-auto w-full max-w-lg">
             <h4 class="font-medium mb-6">Recommended Products:</h4>
             <div class="w-full space-y-4">
                 <?php if (empty($flatRecommendations)): ?>
-                    <div class="border border-black dark:border-gray-400 p-6 text-center text-sm font-medium bg-white dark:bg-gray-800 text-gray-500">
+                    <div class="border border-black dark:border-black p-6 text-center text-sm font-medium bg-white dark:bg-gray-800 text-gray-500">
                         Currently no recommended products
                     </div>
                 <?php else: ?>
                     <?php foreach (array_slice($flatRecommendations, 0, 3) as $rec): ?>
-                        <div class="flex items-center justify-between border border-black dark:border-gray-400 pl-6 pr-0 py-0 font-medium bg-white dark:bg-gray-800">
+                        <div class="flex items-center justify-between border border-black dark:border-black pl-6 pr-0 py-0 font-medium bg-white dark:bg-gray-800">
                             <span><?php echo h($rec['alternative_name']); ?></span>
                             <div class="flex items-center gap-6">
-                                <span>₱ <?php echo number_format((float)($rec['price'] ?? 0), 2); ?></span>
+                                <span>&#8369; <?php echo number_format((float)($rec['price'] ?? 0), 2); ?></span>
                                 <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1' . (isset($_GET['q']) ? '&q=' . urlencode($_GET['q']) : ''))); ?>" class="m-0">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                     <input type="hidden" name="qty" value="1">
-                                    <button type="submit" name="add_to_cart" class="border-l border-black dark:border-gray-400 px-6 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors h-full text-sm font-bold bg-white dark:bg-gray-800 text-black dark:text-white">Add</button>
+                                    <button type="submit" name="add_to_cart" class="border-l border-black dark:border-black px-6 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors h-full text-sm font-bold bg-white dark:bg-gray-800 text-black dark:text-white">Add</button>
                                 </form>
                             </div>
                         </div>
@@ -576,12 +578,12 @@ include '../includes/header.php';
         </div>
         
         <div class="absolute bottom-12 right-12 flex justify-end gap-4">
-            <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-gray-400 px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CANCEL</button>
+            <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-black px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CANCEL</button>
             <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="checkoutForm">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="checkout" value="1">
                 <input type="hidden" name="payment_method" id="selectedPaymentMethod" value="CASH">
-                <button type="submit" class="border border-black dark:border-gray-400 px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CONFIRM PAYMENT</button>
+                <button type="submit" class="border border-black dark:border-black px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CONFIRM PAYMENT</button>
             </form>
         </div>
     </div>
@@ -672,7 +674,8 @@ include '../includes/header.php';
             <p class="text-sm mb-1">0961-195-6139</p>
             <p class="text-sm mb-1">Mabuhay Carmona, Cavite</p>
             <p class="text-sm mb-1">Opening Hours: 9:00 AM - 3:00 PM</p>
-            <p class="text-sm mt-3">Date: <?php echo date('F d, Y', strtotime($receiptSale['sale_date'] ?? 'now')); ?></p>
+            <p class="text-sm mt-3">Transaction No. <?php echo h((string)$receiptSale['sale_id']); ?></p>
+            <p class="text-sm">Date: <?php echo date('F d, Y', strtotime($receiptSale['date'] ?? 'now')); ?></p>
         </div>
         
         <div class="p-8 flex-1 overflow-auto max-h-[40vh]">
@@ -684,7 +687,7 @@ include '../includes/header.php';
                         <th class="pb-3 text-right">AMOUNT</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">
+                <tbody class="divide-y divide-black">
                     <?php foreach ($receiptItems as $item): ?>
                     <tr>
                         <td class="py-4 font-medium"><?php echo h((string)$item['quantity']); ?></td>
@@ -706,20 +709,32 @@ include '../includes/header.php';
 <?php endif; ?>
 
 <script>
-    // AJAX Form Submission Interceptor for POS 
-    document.addEventListener('DOMContentLoaded', () => {
-        document.body.addEventListener('submit', async (e) => {
+    // AJAX Form Submission Interceptor for POS
+    (function initPOS() {
+        // Add Live Search Functionality
+        const liveSearchInput = document.querySelector('input[name="q"]');
+        if (liveSearchInput) {
+            let debounceTimer;
+            liveSearchInput.addEventListener('input', (e) => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    if (liveSearchInput.form) {
+                        liveSearchInput.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                    }
+                }, 300);
+            });
+        }
+
+        // Only attach global body listener ONCE
+        if (!window.posInterceptorAttached) {
+            window.posInterceptorAttached = true;
+            document.body.addEventListener('submit', async (e) => {
             const form = e.target;
             // Intercept standard POS operations (adding, updating, removing cart items)
             if (form.closest('#pos-main-view') || form.closest('.w-\\[400px\\]') || document.querySelector('#pos-main-view')) {
                 const method = (form.method || 'GET').toUpperCase();
-                
-                // Allow GET forms (like search) to proceed normally so URL updates
-                if (method === 'GET') {
-                    return;
-                }
-                
                 const submitter = e.submitter;
+
                 // Allow Checkout to proceed natively to enable redirect/receipt displays
                 if (submitter && submitter.name === 'checkout') {
                     return;
@@ -729,6 +744,28 @@ include '../includes/header.php';
                 const formData = new FormData(form);
                 if (submitter && submitter.name) {
                     formData.append(submitter.name, submitter.value);
+                }
+
+                let fetchUrl = form.action || window.location.href;
+                let fetchOptions = {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                };
+
+                if (method === 'GET') {
+                    const url = new URL(fetchUrl, window.location.origin);
+                    for (const [key, value] of formData.entries()) {
+                        if (value) {
+                            url.searchParams.set(key, value);
+                        } else {
+                            url.searchParams.delete(key);
+                        }
+                    }
+                    fetchUrl = url.toString();
+                    window.history.pushState({}, '', fetchUrl);
+                    fetchOptions.method = 'GET';
+                } else {
+                    fetchOptions.method = 'POST';
+                    fetchOptions.body = formData;
                 }
 
                 // Save user state
@@ -743,13 +780,7 @@ include '../includes/header.php';
                 const isCheckoutViewOpen = !document.getElementById('pos-checkout-view')?.classList.contains('hidden');
                 
                 try {
-                    const response = await fetch(form.action || window.location.href, {
-                        method: 'POST',
-                        body: formData,
-                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                    });
-
-                    if (response.ok) {
+                    const response = await fetch(fetchUrl, fetchOptions);
                         const html = await response.text();
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(html, 'text/html');
@@ -801,7 +832,8 @@ include '../includes/header.php';
                 }
             }
         });
-    });
+        } // End of window.posInterceptorAttached check
+    })();
 </script>
 
 <?php include '../includes/footer.php'; ?>

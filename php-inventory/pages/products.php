@@ -287,7 +287,6 @@ include '../includes/header.php';
                 }
 
                 $productRecommendations = $recommendations[$productId] ?? [];
-                $topRecommendation = $productRecommendations[0] ?? null;
                 ?>
                 <tr class="hover:bg-gray-50 transition-colors">
                     <td class="border border-black p-4 text-center font-medium">

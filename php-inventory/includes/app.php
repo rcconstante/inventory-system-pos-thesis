@@ -201,7 +201,7 @@ function can_manage_catalog(): bool
 
 function can_delete_catalog(): bool
 {
-    return has_any_role([APP_ROLE_ADMIN]);
+    return has_any_role([APP_ROLE_ADMIN, APP_ROLE_STAFF]);
 }
 
 function require_login(array $allowedRoleIds = []): void
