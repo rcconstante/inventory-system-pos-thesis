@@ -14,7 +14,7 @@ $summaryStatement = $pdo->query(
 );
 $summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['daily_sales' => 0];
 
-$countStatement = $pdo->query("SELECT COUNT(*) FROM Sale WHERE DATE(`date`) = CURDATE()");
+$countStatement = $pdo->query("SELECT COUNT(*) FROM Sale WHERE DATE(`date`) = CURDATE() AND status = 'COMPLETED'");
 $totalTransactions = (int) $countStatement->fetchColumn();
 
 // Fast Moving Products

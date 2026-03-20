@@ -11,7 +11,7 @@ $tabs = [
     'top_selling' => 'Top Selling',
     'sold_items' => 'Sold Items',
     'critical_stocks' => 'Critical Stocks',
-    'cancelled_orders' => 'Cancelled Orders',
+    'cancelled_orders' => 'Returned Orders',
 ];
 
 $defaultTab = 'top_selling';
@@ -85,13 +85,12 @@ if ($activeTab === 'top_selling') {
             c.category_name,
             p.product_name,
             p.brand,
-            si.quantity,
-            s.cancel_reason
+            si.quantity
          FROM Sale_Item si
          INNER JOIN Sale s ON s.sale_id = si.sale_id
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
-         WHERE s.status = 'CANCELLED' AND " . implode(' AND ', $salesFilters) . "
+         WHERE s.status = 'RETURNED' AND " . implode(' AND ', $salesFilters) . "
          ORDER BY s.`date` DESC, s.sale_id DESC"
     );
     $statement->execute($queryParameters);
@@ -199,7 +198,7 @@ include '../includes/header.php';
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
                     <div><?php echo h((string) ($record['quantity'] ?? 0)); ?></div>
-                    <div><?php echo h($record['cancel_reason'] ?? 'User Cancelled'); ?></div>
+                    <div>Returned</div>
                 </div>
             <?php else: ?>
                 <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">

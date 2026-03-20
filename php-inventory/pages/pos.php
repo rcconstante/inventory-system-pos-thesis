@@ -101,6 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($addedCount > 0) {
                 set_flash('success', "$addedCount product(s) added to cart.");
+            } else {
+                set_flash('error', 'No products were added. Items may be out of stock or quantity exceeds available stock.');
             }
             
             $redirectUrl = 'pos.php' . (isset($_GET['q']) ? '?q=' . urlencode($_GET['q']) : '');
@@ -323,8 +325,9 @@ $receiptSale = null;
 $receiptItems = [];
 if (isset($_GET['receipt_id'])) {
     $receiptId = (int)$_GET['receipt_id'];
-    $receiptSaleStmt = $pdo->prepare("SELECT * FROM Sale WHERE sale_id = ?");
-    $receiptSaleStmt->execute([$receiptId]);
+    // Verify ownership — a cashier may only view their own receipts (prevents IDOR)
+    $receiptSaleStmt = $pdo->prepare("SELECT * FROM Sale WHERE sale_id = ? AND user_id = ?");
+    $receiptSaleStmt->execute([$receiptId, current_user_id()]);
     $receiptSale = $receiptSaleStmt->fetch(PDO::FETCH_ASSOC);
     if ($receiptSale) {
         $receiptItemsStmt = $pdo->prepare("SELECT si.*, p.product_name FROM Sale_Item si JOIN Products p ON si.product_id = p.product_id WHERE si.sale_id = ?");

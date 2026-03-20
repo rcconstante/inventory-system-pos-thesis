@@ -29,16 +29,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->beginTransaction();
             
-            // Check if it's already returned
-            $checkSale = $pdo->prepare("SELECT status FROM Sale WHERE sale_id = ? FOR UPDATE");
-            $checkSale->execute([$saleId]);
+            // Verify the sale exists AND belongs to this cashier (prevents IDOR)
+            $checkSale = $pdo->prepare("SELECT status FROM Sale WHERE sale_id = ? AND user_id = ? FOR UPDATE");
+            $checkSale->execute([$saleId, $cashierId]);
             $saleStatus = $checkSale->fetchColumn();
             
-            if (!$saleStatus) {
+            if ($saleStatus === false) {
                 throw new RuntimeException("Sale not found.");
             }
-            if (strtoupper($saleStatus) === 'RETURNED') {
-                throw new RuntimeException("This transaction has already been returned.");
+            if (strtoupper($saleStatus) !== 'COMPLETED') {
+                throw new RuntimeException("Only completed transactions can be returned.");
             }
             
             // Mark sale as returned
@@ -94,6 +94,12 @@ $summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['daily_sales' => 0, 'w
 $countStatement = $pdo->prepare('SELECT COUNT(*) FROM Sale WHERE user_id = :user_id AND DATE(`date`) = CURDATE()');
 $countStatement->execute(['user_id' => $cashierId]);
 $totalTransactions = (int) $countStatement->fetchColumn();
+
+// Separate count for the summary card — only COMPLETED (not returned) sales count as productive transactions
+$completedCountStatement = $pdo->prepare("SELECT COUNT(*) FROM Sale WHERE user_id = :user_id AND DATE(`date`) = CURDATE() AND status = 'COMPLETED'");
+$completedCountStatement->execute(['user_id' => $cashierId]);
+$completedTransactions = (int) $completedCountStatement->fetchColumn();
+
 $totalPages = max(1, (int) ceil($totalTransactions / $perPage));
 
 if ($transactionPage > $totalPages) {
@@ -136,7 +142,7 @@ include '../includes/header.php';
 <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
     <div class="flex flex-col items-center justify-center rounded-lg bg-[#8E9CFF] p-8 text-black text-center shadow-sm h-32">
         <p class="text-lg font-normal mb-1">Daily Transaction (Today)</p>
-        <p class="text-3xl font-bold"><?php echo h((string) $totalTransactions); ?></p>
+        <p class="text-3xl font-bold"><?php echo h((string) $completedTransactions); ?></p>
     </div>
 
     <div class="flex flex-col items-center justify-center rounded-lg bg-[#4CD995] p-8 text-black text-center shadow-sm h-32">
