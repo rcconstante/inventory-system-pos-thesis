@@ -1,10 +1,9 @@
 <?php
 $currentUser = current_user_session();
 $preferences = get_preferences();
-$isAdmin = (int)$currentUser['role_id'] === APP_ROLE_ADMIN;
 ?>
 <div id="settings-modal" class="hidden fixed inset-0 z-[100] items-center justify-center bg-black/50 p-4 transition-opacity">
-    <div class="w-full max-w-lg bg-white dark:bg-gray-800 relative border-4 border-blue-500 rounded-sm transition-colors duration-200">
+    <div class="w-full max-w-lg bg-white dark:bg-gray-800 relative border border-black dark:border-gray-600 rounded-sm transition-colors duration-200">
         <!-- Close Button -->
         <button type="button" onclick="closeSettingsModal()" class="absolute top-4 right-4 p-1 text-black dark:text-white hover:text-gray-600 dark:hover:text-gray-300 z-10" aria-label="Close settings">
             <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -59,28 +58,7 @@ $isAdmin = (int)$currentUser['role_id'] === APP_ROLE_ADMIN;
                 </form>
             </div>
 
-            <?php if ($isAdmin): ?>
-            <!-- Admin Only: Change Password -->
-            <div class="mt-10 border-t border-gray-300 pt-6">
-                <p class="text-xs font-bold uppercase tracking-widest text-black mb-4">Admin Security (Change Password)</p>
-                <form method="POST" action="<?php echo h(app_url('pages/settings.php')); ?>" class="space-y-3">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="settings_action" value="update_password">
-                    <div>
-                        <input type="password" name="current_password" placeholder="Current Password" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-black">
-                    </div>
-                    <div>
-                        <input type="password" name="new_password" placeholder="New Password" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-black">
-                    </div>
-                    <div>
-                        <input type="password" name="confirm_password" placeholder="Confirm New Password" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-black">
-                    </div>
-                    <div class="flex justify-end pt-3">
-                        <button type="submit" class="rounded bg-black px-4 py-2 text-sm font-bold text-white hover:bg-gray-800">Update Password</button>
-                    </div>
-                </form>
-            </div>
-            <?php endif; ?>
+
 
         </div>
     </div>
