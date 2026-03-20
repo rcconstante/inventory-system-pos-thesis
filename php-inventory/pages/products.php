@@ -246,7 +246,7 @@ include '../includes/header.php';
         </select>
     </form>
 
-    <?php if ($canManage): ?>
+    <?php if (current_role_id() === APP_ROLE_STAFF): ?>
         <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
@@ -319,17 +319,49 @@ include '../includes/header.php';
 
 <?php if ($canManage): ?>
     <div id="addProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
-            <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
-                <h2 class="text-xl font-bold">Add New Product</h2>
-                <button type="button" onclick="toggleProductModal('addProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
-            </div>
-            <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>" class="space-y-4">
+        <div class="w-full max-w-xl rounded-lg bg-white dark:bg-gray-800 p-8 shadow-xl dark:text-gray-100">
+            <h2 class="text-xl font-bold mb-6">ADD PRODUCT</h2>
+            <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
                 <?php echo csrf_field(); ?>
-                <?php include __DIR__ . '/product_form_fields.php'; ?>
-                <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
-                    <button type="button" onclick="toggleProductModal('addProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
-                    <button type="submit" name="add_product" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Product</button>
+                <!-- Hidden fields required by backend but not shown in simplified form -->
+                <input type="hidden" name="description" value="">
+                <input type="hidden" name="product_type" value="">
+                <input type="hidden" name="specification" value="">
+                <input type="hidden" name="min_stock_level" value="0">
+                <div class="grid grid-cols-2 gap-x-6 gap-y-4 mb-8">
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Category</label>
+                        <select name="category_id" required class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                            <option value="">Select Category</option>
+                            <?php foreach ($categories as $category): ?>
+                                <option value="<?php echo h((string) $category['category_id']); ?>"><?php echo h($category['category_name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Product Name</label>
+                        <input type="text" name="product_name" required class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Brand Name</label>
+                        <input type="text" name="brand" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Specification Compatibility</label>
+                        <input type="text" name="compatibility" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Price</label>
+                        <input type="number" name="price" required min="0" step="0.01" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Quantity</label>
+                        <input type="number" name="current_stock" required min="0" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" onclick="toggleProductModal('addProductModal', false)" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Close</button>
+                    <button type="submit" name="add_product" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Create</button>
                 </div>
             </form>
         </div>

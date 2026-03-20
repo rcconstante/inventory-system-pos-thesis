@@ -8,7 +8,6 @@ if (is_logged_in()) {
 }
 
 $flashMessages = pull_flash_messages();
-<?php
 $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
 ?>
 <!DOCTYPE html>
