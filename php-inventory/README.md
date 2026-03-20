@@ -61,14 +61,7 @@ git clone https://github.com/rcconstante/inventory-system-pos-thesis inventory
 6. Click **"Choose File"** → select `C:\xampp\htdocs\inventory\php-inventory\database.sql`
 7. Click **"Go"** — this creates all tables and inserts default data
 
-### 4. Run Migrations
-
-Open in your browser:
-```
-http://localhost/inventory/php-inventory/db_migrate.php
-```
-
-### 5. Access the Application
+### 4. Access the Application
 
 ```
 http://localhost/inventory/php-inventory/
