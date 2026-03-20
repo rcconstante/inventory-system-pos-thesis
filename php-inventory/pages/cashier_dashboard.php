@@ -131,7 +131,7 @@ $page_title = 'DASHBOARD';
 include '../includes/header.php';
 ?>
 
-<h2 class="mb-8 text-2xl font-normal text-black">WELCOME TO FIVE BROTHERS TRADING</h2>
+<h2 class="mb-8 text-2xl font-normal text-black dark:text-gray-100">WELCOME TO FIVE BROTHERS TRADING</h2>
 
 <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
     <div class="flex flex-col items-center justify-center rounded-lg bg-[#8E9CFF] p-8 text-black text-center shadow-sm h-32">
@@ -150,9 +150,9 @@ include '../includes/header.php';
         <h3 class="text-base font-bold">TODAY'S TRANSACTION</h3>
     </div>
 
-    <div class="overflow-hidden rounded-lg border border-black">
-        <div class="border-b border-black bg-white">
-            <div class="grid grid-cols-4 gap-4 p-4 text-sm font-semibold">
+    <div class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
+        <div class="border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800">
+            <div class="grid grid-cols-4 gap-4 p-4 text-sm font-semibold dark:text-gray-300">
                 <div>ORDER ID</div>
                 <div>PAYMENT METHOD</div>
                 <div>AMOUNT</div>
@@ -161,7 +161,7 @@ include '../includes/header.php';
         </div>
 
         <?php if ($transactions === []): ?>
-            <div class="p-4 text-center text-sm text-gray-500">No transactions recorded today.</div>
+            <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">No transactions recorded today.</div>
         <?php else: ?>
             <?php foreach ($transactions as $transaction): 
                 $saleId = $transaction['sale_id'];
@@ -175,7 +175,7 @@ include '../includes/header.php';
                     'items' => $items
                 ]);
             ?>
-                <div onclick="openReceiptModal(<?php echo htmlspecialchars($jsonSale, ENT_QUOTES, 'UTF-8'); ?>)" class="grid grid-cols-4 gap-4 border-b border-black p-4 text-sm last:border-b-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <div onclick="openReceiptModal(<?php echo htmlspecialchars($jsonSale, ENT_QUOTES, 'UTF-8'); ?>)" class="grid grid-cols-4 gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100 transition-colors">
                     <div>#<?php echo h((string) $transaction['sale_id']); ?></div>
                     <div><?php echo h((string) $transaction['payment_method']); ?></div>
                     <div>P<?php echo h(money_format_php((float) $transaction['total_amount'])); ?></div>
@@ -189,13 +189,13 @@ include '../includes/header.php';
 
     <div class="mt-6 flex justify-end gap-3">
         <?php if ($transactionPage > 1): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage - 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Previous</a>
+            <a href="?page=<?php echo h((string) ($transactionPage - 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Previous</a>
         <?php else: ?>
             <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Previous</button>
         <?php endif; ?>
 
         <?php if ($transactionPage < $totalPages): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage + 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black px-6 py-2 text-black hover:bg-gray-50">Next</a>
+            <a href="?page=<?php echo h((string) ($transactionPage + 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Next</a>
         <?php else: ?>
             <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Next</button>
         <?php endif; ?>
@@ -258,13 +258,13 @@ include '../includes/header.php';
             
             <div class="mb-8">
                 <label class="block text-sm font-bold mb-2 uppercase tracking-wide">Reason for Return</label>
-                <select name="return_reason" required class="w-full border border-black dark:border-gray-500 bg-transparent px-4 py-3 focus:outline-none">
-                    <option value="" class="text-black">Select a reason...</option>
-                    <option value="Wrong Item Received" class="text-black">Wrong Item Received</option>
-                    <option value="Damaged Item" class="text-black">Damaged Item</option>
-                    <option value="Expired Product" class="text-black">Expired Product</option>
-                    <option value="Customer Changed Mind" class="text-black">Customer Changed Mind</option>
-                    <option value="Other" class="text-black">Other</option>
+                <select name="return_reason" required class="w-full border border-black dark:border-gray-500 bg-transparent px-4 py-3 focus:outline-none dark:text-gray-100">
+                    <option value="" class="text-black dark:text-gray-100 dark:bg-gray-800">Select a reason...</option>
+                    <option value="Wrong Item Received" class="text-black dark:text-gray-100 dark:bg-gray-800">Wrong Item Received</option>
+                    <option value="Damaged Item" class="text-black dark:text-gray-100 dark:bg-gray-800">Damaged Item</option>
+                    <option value="Expired Product" class="text-black dark:text-gray-100 dark:bg-gray-800">Expired Product</option>
+                    <option value="Customer Changed Mind" class="text-black dark:text-gray-100 dark:bg-gray-800">Customer Changed Mind</option>
+                    <option value="Other" class="text-black dark:text-gray-100 dark:bg-gray-800">Other</option>
                 </select>
             </div>
             

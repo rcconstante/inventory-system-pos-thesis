@@ -110,7 +110,7 @@ $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
     <div class="flex-1 flex flex-col overflow-hidden">
         
         <!-- Header -->
-        <div class="bg-white dark:bg-gray-800 border-b border-black dark:border-black px-8 py-6 flex items-center justify-between transition-colors duration-200">
+        <div class="bg-white dark:bg-gray-800 border-b border-black dark:border-gray-600 px-8 py-6 flex items-center justify-between transition-colors duration-200">
             <?php if(isset($page_title)): ?>
                 <h1 class="text-3xl font-bold uppercase tracking-wider"><?php echo htmlspecialchars($page_title); ?></h1>
             <?php else: ?>

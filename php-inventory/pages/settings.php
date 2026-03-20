@@ -31,7 +31,6 @@ try {
             'default_payment_method' => $existingPreferences['default_payment_method'] ?? 'CASH',
         ]);
 
-        set_flash('success', 'Your settings were updated successfully.');
     } else {
         throw new RuntimeException('Unknown settings action.');
     }

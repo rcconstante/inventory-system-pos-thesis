@@ -121,9 +121,9 @@ $page_title = 'REPORTS';
 include '../includes/header.php';
 ?>
 
-<div class="mb-6 flex flex-wrap gap-8 border-b border-black pb-4">
+<div class="mb-6 flex flex-wrap gap-8 border-b border-black dark:border-gray-600 pb-4">
     <?php foreach ($tabs as $tabKey => $label): ?>
-        <a href="?tab=<?php echo h($tabKey); ?>&from=<?php echo h($dateFrom); ?>&to=<?php echo h($dateTo); ?>" class="pb-2 text-sm font-medium <?php echo $activeTab === $tabKey ? 'border-b-2 border-black' : 'text-gray-600 hover:text-black'; ?>">
+        <a href="?tab=<?php echo h($tabKey); ?>&from=<?php echo h($dateFrom); ?>&to=<?php echo h($dateTo); ?>" class="pb-2 text-sm font-medium <?php echo $activeTab === $tabKey ? 'border-b-2 border-black dark:border-gray-100 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200'; ?>">
             <?php echo h($label); ?>
         </a>
     <?php endforeach; ?>
@@ -133,20 +133,20 @@ include '../includes/header.php';
     <form method="GET" class="mb-6 flex flex-wrap items-end gap-4">
         <input type="hidden" name="tab" value="<?php echo h($activeTab); ?>">
         <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">From</label>
-            <input type="date" name="from" value="<?php echo h($dateFrom); ?>" class="rounded border border-black px-3 py-2 text-sm focus:outline-none">
+            <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">From</label>
+            <input type="date" name="from" value="<?php echo h($dateFrom); ?>" class="rounded border border-black dark:border-gray-600 px-3 py-2 text-sm focus:outline-none dark:bg-gray-800 dark:text-gray-100">
         </div>
         <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">To</label>
-            <input type="date" name="to" value="<?php echo h($dateTo); ?>" class="rounded border border-black px-3 py-2 text-sm focus:outline-none">
+            <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">To</label>
+            <input type="date" name="to" value="<?php echo h($dateTo); ?>" class="rounded border border-black dark:border-gray-600 px-3 py-2 text-sm focus:outline-none dark:bg-gray-800 dark:text-gray-100">
         </div>
-        <button type="submit" class="rounded bg-black px-4 py-2 text-sm text-white hover:bg-gray-800">Apply</button>
+        <button type="submit" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Apply</button>
     </form>
 <?php endif; ?>
 
-<div class="overflow-hidden rounded-lg border border-black">
+<div class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
     <?php if ($activeTab === 'critical_stocks'): ?>
-        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
+        <div class="grid grid-cols-7 gap-4 border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4 text-xs font-medium uppercase dark:text-gray-300">
             <div>NO</div>
             <div>PRODUCT ID</div>
             <div>CATEGORY</div>
@@ -156,7 +156,7 @@ include '../includes/header.php';
             <div>REORDER LEVEL</div>
         </div>
     <?php elseif ($activeTab === 'cancelled_orders'): ?>
-        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
+        <div class="grid grid-cols-7 gap-4 border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4 text-xs font-medium uppercase dark:text-gray-300">
             <div>NO</div>
             <div>PRODUCT ID</div>
             <div>CATEGORY</div>
@@ -166,7 +166,7 @@ include '../includes/header.php';
             <div>REASON</div>
         </div>
     <?php else: ?>
-        <div class="grid grid-cols-7 gap-4 border-b border-black bg-white p-4 text-xs font-medium uppercase">
+        <div class="grid grid-cols-7 gap-4 border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4 text-xs font-medium uppercase dark:text-gray-300">
             <div>NO</div>
             <div>PRODUCT ID</div>
             <div>CATEGORY</div>
@@ -178,11 +178,11 @@ include '../includes/header.php';
     <?php endif; ?>
 
     <?php if ($records === []): ?>
-        <div class="p-4 text-center text-sm text-gray-500">No records found for the selected view.</div>
+        <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">No records found for the selected view.</div>
     <?php else: ?>
         <?php foreach ($records as $index => $record): ?>
             <?php if ($activeTab === 'critical_stocks'): ?>
-                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
                     <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
@@ -192,7 +192,7 @@ include '../includes/header.php';
                     <div><?php echo h((string) $record['min_stock_level']); ?></div>
                 </div>
             <?php elseif ($activeTab === 'cancelled_orders'): ?>
-                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
                     <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
@@ -202,7 +202,7 @@ include '../includes/header.php';
                     <div><?php echo h($record['cancel_reason'] ?? 'User Cancelled'); ?></div>
                 </div>
             <?php else: ?>
-                <div class="grid grid-cols-7 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+                <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
                     <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>

@@ -50,14 +50,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Invalid credentials for the selected role.';
     }
 }
+<?php
+$isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="<?php echo $isDarkMode ? 'dark' : ''; ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Inventory POS</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
     <style>
         .custom-dark-bg { background-color: #363C52; }
         /* Suppress browser native password reveal button */
@@ -70,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M0 24.5348C0 28.6303 3.32014 31.9505 7.41573 31.9505H32L0 1.79497V24.5348Z' fill='url(%23logo_gradient_1)'/%3E%3Cpath opacity='0.983161' fill-rule='evenodd' clip-rule='evenodd' d='M0 7.40946C0 3.31387 3.32014 0 7.41573 0H32C32 0 3.73034 25.7671 1.2263 28.2342C0 29.9414 1.43276 31.8648 1.43276 31.8648C1.43276 31.8648 0 31.1225 0 29.5198C0 28.7041 0 15.8841 0 7.40946Z' fill='url(%23logo_gradient_2)'/%3E%3Cdefs%3E%3ClinearGradient id='logo_gradient_1' x1='16' y1='1.79497' x2='16' y2='31.9505' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%234CD995'/%3E%3Cstop offset='1' stop-color='%234CD995' stop-opacity='0'/%3E%3C/linearGradient%3E%3ClinearGradient id='logo_gradient_2' x1='16' y1='0' x2='16' y2='31.8648' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%238E9CFF'/%3E%3Cstop offset='1' stop-color='%238E9CFF' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E">
 </head>
-<body class="min-h-screen bg-white flex items-center justify-center p-4">
+<body class="min-h-screen bg-white dark:bg-gray-900 flex items-center justify-center p-4">
 
     <div class="w-full max-w-2xl">
         <!-- Main Content -->

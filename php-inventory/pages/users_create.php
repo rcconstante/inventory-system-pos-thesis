@@ -72,8 +72,8 @@ $page_title = 'Create User Account';
 include '../includes/header.php';
 ?>
 
-<div class="max-w-4xl mx-auto mt-6 bg-white border border-black rounded-lg p-8 shadow-sm">
-    <h2 class="text-xl font-bold mb-6 border-b border-black pb-4">Create User Account</h2>
+<div class="max-w-4xl mx-auto mt-6 bg-white dark:bg-gray-800 border border-black dark:border-gray-600 rounded-lg p-8 shadow-sm dark:text-gray-100">
+    <h2 class="text-xl font-bold mb-6 border-b border-black dark:border-gray-600 pb-4">Create User Account</h2>
     
     <form method="POST" action="<?php echo h(app_url('pages/users_create.php')); ?>" class="space-y-6">
         <?php echo csrf_field(); ?>
@@ -84,19 +84,19 @@ include '../includes/header.php';
                 <div>
                     <label class="block text-sm font-medium mb-2">Full Name</label>
                     <input type="text" name="full_name" required placeholder="JUAN DELA CRUZ"
-                           class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                           class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100">
                 </div>
                 
                 <div>
                     <label class="block text-sm font-medium mb-2">Display Name</label>
                     <input type="text" name="display_name" placeholder="JUAN"
-                           class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                           class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100">
                 </div>
                 
                 <div>
                     <label class="block text-sm font-medium mb-2">Password</label>
                     <input type="password" name="password" required placeholder="123456789"
-                           class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                           class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100">
                 </div>
             </div>
 
@@ -105,13 +105,13 @@ include '../includes/header.php';
                 <div>
                     <label class="block text-sm font-medium mb-2">Username</label>
                     <input type="text" name="username" required placeholder="JUAN@15"
-                           class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                           class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100">
                 </div>
                 
                 <div>
                     <label class="block text-sm font-medium mb-2">Role</label>
                     <select name="role_id" required 
-                            class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[position:right_1rem_center]">
+                            class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[position:right_1rem_center]">
                         <?php foreach ($roles as $role): ?>
                             <option value="<?php echo h((string) $role['role_id']); ?>">
                                 <?php echo h(strtoupper($role['role_type'])); ?>
@@ -123,18 +123,18 @@ include '../includes/header.php';
                 <div>
                     <label class="block text-sm font-medium mb-2">Confirm Password</label>
                     <input type="password" name="confirm_password" required placeholder="123456789"
-                           class="w-full px-4 py-3 border border-black rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                           class="w-full px-4 py-3 border border-black dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100">
                 </div>
             </div>
         </div>
 
         <div class="flex justify-end gap-4 mt-8 pt-6 border-t border-transparent">
             <a href="<?php echo h(app_url('pages/users.php')); ?>" 
-               class="px-8 py-2 border border-black rounded text-black font-medium hover:bg-gray-50 transition-colors">
+               class="px-8 py-2 border border-black dark:border-gray-600 rounded text-black dark:text-gray-100 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                 Close
             </a>
             <button type="submit" 
-                    class="px-8 py-2 border border-black rounded text-black font-medium hover:bg-gray-50 transition-colors">
+                    class="px-8 py-2 border border-black dark:border-gray-600 rounded text-black dark:text-gray-100 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                 Create
             </button>
         </div>

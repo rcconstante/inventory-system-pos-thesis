@@ -236,7 +236,7 @@ include '../includes/header.php';
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
     <form method="GET" class="flex items-center gap-4">
         <span class="text-sm font-medium">Stock Inventory</span>
-        <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black bg-white px-3 py-2 text-sm">
+        <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
             <option value="0">All Categories</option>
             <?php foreach ($categories as $category): ?>
                 <option value="<?php echo h((string) $category['category_id']); ?>" <?php echo $selectedCategoryId === (int) $category['category_id'] ? 'selected' : ''; ?>>
@@ -247,30 +247,30 @@ include '../includes/header.php';
     </form>
 
     <?php if ($canManage): ?>
-        <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black px-4 py-2 text-sm font-medium hover:bg-gray-50">
+        <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
     <?php endif; ?>
 </div>
 
-<div class="overflow-x-auto bg-white mb-8">
-    <table class="w-full border-collapse border border-black text-sm">
+<div class="overflow-x-auto bg-white dark:bg-gray-800 mb-8">
+    <table class="w-full border-collapse border border-black dark:border-gray-600 text-sm">
         <thead>
-            <tr class="text-sm font-bold uppercase text-gray-700">
-                <th class="border border-black p-4 w-[100px] text-center">PRODUCT ID</th>
-                <th class="border border-black p-4 text-left">PRODUCTS</th>
-                <th class="border border-black p-4 text-center">CATEGORY</th>
-                <th class="border border-black p-4 text-center">PRICE</th>
-                <th class="border border-black p-4 text-center w-[130px]">EXP DATE</th>
-                <th class="border border-black p-4 text-center w-[90px]">STOCK</th>
-                <th class="border border-black p-4 text-center w-[110px]">SALES COUNT</th>
-                <th class="border border-black p-4 text-center w-[150px]">STATUS</th>
+            <tr class="text-sm font-bold uppercase text-gray-700 dark:text-gray-300">
+                <th class="border border-black dark:border-gray-600 p-4 w-[100px] text-center">PRODUCT ID</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-left">PRODUCTS</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center">CATEGORY</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center">PRICE</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center w-[130px]">EXP DATE</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center w-[90px]">STOCK</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center w-[110px]">SALES COUNT</th>
+                <th class="border border-black dark:border-gray-600 p-4 text-center w-[150px]">STATUS</th>
             </tr>
         </thead>
         <tbody>
         <?php if ($products === []): ?>
             <tr>
-                <td colspan="8" class="border border-black p-8 text-center text-gray-500">No products found.</td>
+                <td colspan="8" class="border border-black dark:border-gray-600 p-8 text-center text-gray-500 dark:text-gray-400">No products found.</td>
             </tr>
         <?php else: ?>
             <?php foreach ($products as $product): ?>
@@ -288,13 +288,13 @@ include '../includes/header.php';
 
                 $productRecommendations = $recommendations[$productId] ?? [];
                 ?>
-                <tr class="hover:bg-gray-50 transition-colors">
-                    <td class="border border-black p-4 text-center font-medium">
+                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    <td class="border border-black dark:border-gray-600 p-4 text-center font-medium dark:text-gray-100">
                         P<?php echo str_pad((string)$productId, 3, '0', STR_PAD_LEFT); ?>
                     </td>
-                    <td class="border border-black p-4 text-left">
-                        <div class="font-medium text-black"><?php echo h($product['product_name']); ?></div>
-                        <div class="mt-1 text-xs text-gray-500">
+                    <td class="border border-black dark:border-gray-600 p-4 text-left">
+                        <div class="font-medium text-black dark:text-gray-100"><?php echo h($product['product_name']); ?></div>
+                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             <?php echo h($product['product_type'] !== '' ? $product['product_type'] : 'General product'); ?>
                             <?php if ($product['compatibility'] !== ''): ?>
                                 <span class="mx-1">|</span>
@@ -302,52 +302,13 @@ include '../includes/header.php';
                             <?php endif; ?>
                         </div>
                     </td>
-                    <td class="border border-black p-4 text-center text-black"><?php echo h($product['category_name'] ?? 'N/A'); ?></td>
-                    <td class="border border-black p-4 text-center text-black"><?php echo h(money_format_php((float) $product['price'])); ?></td>
-                    <td class="border border-black p-4 text-center text-black"><?php echo h($product['expiry_date'] ? date('F d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
-                    <td class="border border-black p-4 text-center text-black"><?php echo h((string) $currentStock); ?></td>
-                    <td class="border border-black p-4 text-center text-black"><?php echo h((string) $salesCount); ?></td>
-                    <td class="border border-black p-4 text-center text-black">
-                        <div class="text-xs font-semibold uppercase flex flex-col items-center justify-center gap-2">
-                            <span><?php echo h($statusLabel); ?></span>
-                            
-                            <?php if ($canManage): ?>
-                                <div class="flex gap-1 justify-center">
-                                    <button
-                                        type="button"
-                                        title="Edit product"
-                                        class="rounded bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100"
-                                        data-product-id="<?php echo h((string) $productId); ?>"
-                                        data-product-name="<?php echo h($product['product_name']); ?>"
-                                        data-category-id="<?php echo h((string) $product['category_id']); ?>"
-                                        data-brand="<?php echo h($product['brand']); ?>"
-                                        data-description="<?php echo h($product['description']); ?>"
-                                        data-price="<?php echo h((string) $product['price']); ?>"
-                                        data-product-type="<?php echo h($product['product_type']); ?>"
-                                        data-specification="<?php echo h($product['specification']); ?>"
-                                        data-compatibility="<?php echo h($product['compatibility']); ?>"
-                                        data-current-stock="<?php echo h((string) $currentStock); ?>"
-                                        data-min-stock-level="<?php echo h((string) $minStockLevel); ?>"
-                                        data-expiry-date="<?php echo h($product['expiry_date'] ?? ''); ?>"
-                                        onclick="openEditProductModal(this)"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                                    </button>
-                                    <?php if ($canDelete): ?>
-                                    <button
-                                        type="button"
-                                        title="Delete product"
-                                        class="rounded bg-red-50 p-1.5 text-red-700 hover:bg-red-100"
-                                        data-product-id="<?php echo h((string) $productId); ?>"
-                                        data-product-name="<?php echo h($product['product_name']); ?>"
-                                        onclick="openDeleteProductModal(this)"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                    </button>
-                                    <?php endif; ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['category_name'] ?? 'N/A'); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h(money_format_php((float) $product['price'])); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['expiry_date'] ? date('F d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h((string) $currentStock); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h((string) $salesCount); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100">
+                        <span class="text-xs font-semibold uppercase"><?php echo h($statusLabel); ?></span>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -358,52 +319,52 @@ include '../includes/header.php';
 
 <?php if ($canManage): ?>
     <div id="addProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between border-b pb-3">
+        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+            <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
                 <h2 class="text-xl font-bold">Add New Product</h2>
-                <button type="button" onclick="toggleProductModal('addProductModal', false)" class="text-gray-500 hover:text-black">Close</button>
+                <button type="button" onclick="toggleProductModal('addProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
             </div>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>" class="space-y-4">
                 <?php echo csrf_field(); ?>
                 <?php include __DIR__ . '/product_form_fields.php'; ?>
-                <div class="flex justify-end gap-2 border-t pt-4">
-                    <button type="button" onclick="toggleProductModal('addProductModal', false)" class="rounded border px-4 py-2 hover:bg-gray-50">Cancel</button>
-                    <button type="submit" name="add_product" class="rounded bg-black px-4 py-2 text-white hover:bg-gray-800">Save Product</button>
+                <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
+                    <button type="button" onclick="toggleProductModal('addProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
+                    <button type="submit" name="add_product" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Product</button>
                 </div>
             </form>
         </div>
     </div>
 
     <div id="editProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between border-b pb-3">
+        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+            <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
                 <h2 class="text-xl font-bold">Edit Product</h2>
-                <button type="button" onclick="toggleProductModal('editProductModal', false)" class="text-gray-500 hover:text-black">Close</button>
+                <button type="button" onclick="toggleProductModal('editProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
             </div>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>" class="space-y-4">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="product_id" id="edit_product_id">
                 <?php $formPrefix = 'edit_'; include __DIR__ . '/product_form_fields.php'; ?>
-                <div class="flex justify-end gap-2 border-t pt-4">
-                    <button type="button" onclick="toggleProductModal('editProductModal', false)" class="rounded border px-4 py-2 hover:bg-gray-50">Cancel</button>
-                    <button type="submit" name="edit_product" class="rounded bg-black px-4 py-2 text-white hover:bg-gray-800">Save Changes</button>
+                <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
+                    <button type="button" onclick="toggleProductModal('editProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
+                    <button type="submit" name="edit_product" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Changes</button>
                 </div>
             </form>
         </div>
     </div>
     <?php if ($canDelete): ?>
     <div id="deleteProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-        <div class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between border-b pb-3">
+        <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+            <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
                 <h2 class="text-lg font-bold">Delete Product</h2>
-                <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="text-gray-500 hover:text-black">Close</button>
+                <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
             </div>
-            <p class="mb-6 text-sm text-gray-700">Are you sure you want to delete <strong id="deleteProductName"></strong>? This action cannot be undone.</p>
+            <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">Are you sure you want to delete <strong id="deleteProductName"></strong>? This action cannot be undone.</p>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="product_id" id="deleteProductId">
                 <div class="flex justify-end gap-2">
-                    <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="rounded border px-4 py-2 text-sm hover:bg-gray-50">Cancel</button>
+                    <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
                     <button type="submit" name="delete_product" class="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">Delete</button>
                 </div>
             </form>

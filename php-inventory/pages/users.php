@@ -118,13 +118,13 @@ include '../includes/header.php';
 ?>
 
 <div class="mb-6 flex justify-end">
-    <a href="<?php echo h(app_url('pages/users_create.php')); ?>" class="rounded bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors">
+    <a href="<?php echo h(app_url('pages/users_create.php')); ?>" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:hover:bg-gray-500 transition-colors">
         + Add User
     </a>
 </div>
 
-<div class="overflow-hidden rounded-lg border border-black">
-    <div class="grid grid-cols-8 gap-4 border-b border-black bg-white p-4 text-sm font-medium">
+<div class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
+    <div class="grid grid-cols-8 gap-4 border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4 text-sm font-medium dark:text-gray-300">
         <div>NO</div>
         <div>NAME</div>
         <div>USERNAME</div>
@@ -136,7 +136,7 @@ include '../includes/header.php';
     </div>
 
     <?php if ($users === []): ?>
-        <div class="p-4 text-center text-sm text-gray-500">No users found.</div>
+        <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">No users found.</div>
     <?php else: ?>
         <?php foreach ($users as $user): ?>
             <?php
@@ -145,13 +145,13 @@ include '../includes/header.php';
                 ? date('M d, Y', strtotime((string) $user['created_at']))
                 : '—';
             ?>
-            <div class="grid grid-cols-8 items-center gap-4 border-b border-black p-4 text-sm last:border-b-0 hover:bg-gray-50">
+            <div class="grid grid-cols-8 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                 <div><?php echo h((string) $user['user_id']); ?></div>
                 <div class="truncate"><?php echo h($user['full_name']); ?></div>
                 <div class="truncate"><?php echo h($user['username']); ?></div>
                 <div class="truncate"><?php echo h($user['email']); ?></div>
                 <div class="uppercase"><?php echo h($user['role_type']); ?></div>
-                <div class="text-xs text-gray-600"><?php echo h($createdAt); ?></div>
+                <div class="text-xs text-gray-600 dark:text-gray-400"><?php echo h($createdAt); ?></div>
                 <div>
                     <span class="inline-flex rounded-full px-2 py-1 text-xs font-semibold <?php echo $isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
                         <?php echo $isActive ? 'Active' : 'Inactive'; ?>
@@ -194,10 +194,10 @@ include '../includes/header.php';
 
 <!-- Edit User Modal -->
 <div id="editUserModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
-        <div class="mb-4 flex items-center justify-between border-b pb-3">
+    <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+        <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
             <h2 class="text-xl font-bold">Edit User</h2>
-            <button type="button" onclick="toggleUserModal('editUserModal', false)" class="text-gray-500 hover:text-black">
+            <button type="button" onclick="toggleUserModal('editUserModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
         </div>
@@ -208,15 +208,15 @@ include '../includes/header.php';
             <?php $formPrefix = 'edit_'; include __DIR__ . '/user_form_fields.php'; ?>
             <div>
                 <label class="mb-1 block text-sm font-medium">New Password</label>
-                <input type="password" name="password" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500" placeholder="Leave blank to keep current password">
+                <input type="password" name="password" class="w-full rounded border dark:border-gray-600 px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-100" placeholder="Leave blank to keep current password">
             </div>
-            <div class="flex items-center gap-3 rounded border px-3 py-2">
+            <div class="flex items-center gap-3 rounded border dark:border-gray-600 px-3 py-2">
                 <input type="checkbox" name="is_active" id="edit_is_active" value="1" class="h-4 w-4 rounded border-gray-300">
                 <label for="edit_is_active" class="text-sm font-medium cursor-pointer select-none">Account is Active</label>
             </div>
-            <div class="flex justify-end gap-2 border-t pt-4">
-                <button type="button" onclick="toggleUserModal('editUserModal', false)" class="rounded border px-4 py-2 hover:bg-gray-50">Cancel</button>
-                <button type="submit" name="edit_user" class="rounded bg-black px-4 py-2 text-white hover:bg-gray-800">Save Changes</button>
+            <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
+                <button type="button" onclick="toggleUserModal('editUserModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+                <button type="submit" name="edit_user" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Changes</button>
             </div>
         </form>
     </div>
@@ -224,22 +224,22 @@ include '../includes/header.php';
 
 <!-- Delete Confirmation Modal -->
 <div id="deleteUserModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
+    <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
         <div class="mb-4 flex items-start gap-3">
-            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100">
+            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
             </div>
             <div>
-                <h3 class="text-base font-bold text-gray-900">Delete User</h3>
-                <p class="mt-1 text-sm text-gray-500">Are you sure you want to delete <strong id="delete-user-name"></strong>? This action cannot be undone.</p>
+                <h3 class="text-base font-bold text-gray-900 dark:text-gray-100">Delete User</h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Are you sure you want to delete <strong id="delete-user-name"></strong>? This action cannot be undone.</p>
             </div>
         </div>
 
         <form method="POST" action="<?php echo h(app_url('pages/users.php')); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="user_id" id="delete_user_id">
-            <div class="flex justify-end gap-2 border-t pt-4">
-                <button type="button" onclick="toggleUserModal('deleteUserModal', false)" class="rounded border px-4 py-2 text-sm hover:bg-gray-50">Cancel</button>
+            <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
+                <button type="button" onclick="toggleUserModal('deleteUserModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
                 <button type="submit" name="delete_user" class="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">Delete</button>
             </div>
         </form>

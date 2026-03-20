@@ -58,17 +58,17 @@ include '../includes/header.php';
     </div>
 </div>
 
-<div class="overflow-hidden border border-black bg-white">
-    <div class="grid grid-cols-2 divide-x divide-black">
+<div class="overflow-hidden border border-black dark:border-gray-600 bg-white dark:bg-gray-800">
+    <div class="grid grid-cols-2 divide-x divide-black dark:divide-gray-600">
         <!-- Fast Moving Products -->
         <div class="p-6">
-            <h3 class="mb-6 text-center text-lg font-bold">FAST MOVING PRODUCTS</h3>
+            <h3 class="mb-6 text-center text-lg font-bold dark:text-white">FAST MOVING PRODUCTS</h3>
             <?php if ($fastMovingProducts === []): ?>
-                <p class="text-center text-gray-500">No data available.</p>
+                <p class="text-center text-gray-500 dark:text-gray-400">No data available.</p>
             <?php else: ?>
                 <ul class="space-y-4 pl-8 list-none">
                     <?php foreach ($fastMovingProducts as $index => $product): ?>
-                        <li class="text-base text-black">
+                        <li class="text-base text-black dark:text-white">
                             <?php echo ($index + 1) . '. ' . h($product['product_name']); ?>
                         </li>
                     <?php endforeach; ?>
@@ -78,13 +78,13 @@ include '../includes/header.php';
 
         <!-- Slow Moving Products -->
         <div class="p-6">
-            <h3 class="mb-6 text-center text-lg font-bold">SLOW MOVING PRODUCTS</h3>
+            <h3 class="mb-6 text-center text-lg font-bold dark:text-white">SLOW MOVING PRODUCTS</h3>
             <?php if ($slowMovingProducts === []): ?>
-                <p class="text-center text-gray-500">No data available.</p>
+                <p class="text-center text-gray-500 dark:text-gray-400">No data available.</p>
             <?php else: ?>
                 <ul class="space-y-4 pl-8 list-none">
                     <?php foreach ($slowMovingProducts as $index => $product): ?>
-                        <li class="text-base text-black">
+                        <li class="text-base text-black dark:text-white">
                             <?php echo ($index + 1) . '. ' . h($product['product_name']); ?>
                         </li>
                     <?php endforeach; ?>

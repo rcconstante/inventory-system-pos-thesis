@@ -664,12 +664,12 @@ include '../includes/header.php';
 <!-- Receipt Modal -->
 <?php if (isset($receiptSale) && $receiptSale): ?>
 <div class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-    <div class="w-[500px] bg-white text-black border border-black shadow-2xl flex flex-col relative">
-        <a href="<?php echo h(app_url('pages/pos.php')); ?>" class="absolute top-4 right-4 text-black hover:text-gray-600">
+    <div class="w-[500px] bg-white dark:bg-gray-800 text-black dark:text-gray-100 border border-black dark:border-gray-600 shadow-2xl flex flex-col relative">
+        <a href="<?php echo h(app_url('pages/pos.php')); ?>" class="absolute top-4 right-4 text-black dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </a>
         
-        <div class="p-8 text-center border-b border-black">
+        <div class="p-8 text-center border-b border-black dark:border-gray-600">
             <h2 class="text-xl font-medium tracking-widest uppercase mb-2">FIVE BROTHERS TRADING</h2>
             <p class="text-sm mb-1">0961-195-6139</p>
             <p class="text-sm mb-1">Mabuhay Carmona, Cavite</p>
@@ -681,13 +681,13 @@ include '../includes/header.php';
         <div class="p-8 flex-1 overflow-auto max-h-[40vh]">
             <table class="w-full text-sm">
                 <thead>
-                    <tr class="text-left font-bold border-b border-black">
+                    <tr class="text-left font-bold border-b border-black dark:border-gray-600">
                         <th class="pb-3 w-16">QTY</th>
                         <th class="pb-3">DESCRIPTION</th>
                         <th class="pb-3 text-right">AMOUNT</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-black">
+                <tbody class="divide-y divide-black dark:divide-gray-600">
                     <?php foreach ($receiptItems as $item): ?>
                     <tr>
                         <td class="py-4 font-medium"><?php echo h((string)$item['quantity']); ?></td>
@@ -699,7 +699,7 @@ include '../includes/header.php';
             </table>
         </div>
         
-        <div class="p-8 border-t border-black bg-white">
+        <div class="p-8 border-t border-black dark:border-gray-600 bg-white dark:bg-gray-800">
             <div class="text-sm font-bold mb-3">TOTAL: <?php echo number_format((float)$receiptSale['total_amount'], 2); ?></div>
             <div class="text-sm font-bold mb-8 uppercase">PAID BY: <?php echo h($receiptSale['payment_method']); ?></div>
             <div class="text-center text-sm font-medium">Thank You :)</div>

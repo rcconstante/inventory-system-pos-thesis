@@ -44,18 +44,14 @@ $preferences = get_preferences();
                 </label>
 
                 <!-- Recommendation System -->
-                <form method="POST" action="<?php echo h(app_url('pages/settings.php')); ?>" id="preferences-form">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="settings_action" value="update_preferences">
-                    <label class="flex cursor-pointer items-center gap-4 group">
-                        <div class="relative flex items-center">
-                            <input type="checkbox" name="show_recommendations" value="1" id="toggle-recommendations" class="sr-only peer" <?php echo !empty($preferences['show_recommendations']) ? 'checked' : ''; ?> onchange="document.getElementById('preferences-form').submit()">
-                            <div class="w-10 h-6 bg-gray-200 rounded-full peer peer-checked:bg-black transition-colors border border-black"></div>
-                            <div class="absolute top-1 left-1 w-4 h-4 bg-white border border-black rounded-full transition-transform peer-checked:translate-x-4"></div>
-                        </div>
-                        <span class="text-sm text-black">Recommendation System</span>
-                    </label>
-                </form>
+                <label class="flex cursor-pointer items-center gap-4 group">
+                    <div class="relative flex items-center">
+                        <input type="checkbox" id="toggle-recommendations" class="sr-only peer" <?php echo !empty($preferences['show_recommendations']) ? 'checked' : ''; ?> onchange="saveRecommendationPreference(this.checked)">
+                        <div class="w-10 h-6 bg-gray-200 rounded-full peer peer-checked:bg-black transition-colors border border-black"></div>
+                        <div class="absolute top-1 left-1 w-4 h-4 bg-white border border-black rounded-full transition-transform peer-checked:translate-x-4"></div>
+                    </div>
+                    <span class="text-sm text-black dark:text-white">Recommendation System</span>
+                </label>
             </div>
 
 
@@ -65,6 +61,18 @@ $preferences = get_preferences();
 </div>
 
 <script>
+    function saveRecommendationPreference(checked) {
+        var formData = new FormData();
+        formData.append('settings_action', 'update_preferences');
+        formData.append('csrf_token', '<?php echo csrf_token(); ?>');
+        if (checked) formData.append('show_recommendations', '1');
+        fetch('<?php echo h(app_url('pages/settings.php')); ?>', {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin'
+        });
+    }
+
     function applyDarkMode(enabled) {
         if (enabled) {
             document.documentElement.classList.add('dark');

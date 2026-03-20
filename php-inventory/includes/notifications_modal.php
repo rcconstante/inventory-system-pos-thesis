@@ -1,19 +1,19 @@
 <div id="notificationsModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl relative">
+    <div class="w-full max-w-lg rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl relative">
         <div class="mb-6 flex items-center justify-between">
-            <h2 class="text-xl font-medium uppercase">Notifications</h2>
-            <button type="button" onclick="toggleNotificationsModal(false)" class="text-black hover:text-gray-700">
+            <h2 class="text-xl font-medium uppercase dark:text-white">Notifications</h2>
+            <button type="button" onclick="toggleNotificationsModal(false)" class="text-black dark:text-white hover:text-gray-700 dark:hover:text-gray-300">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
         </div>
         
         <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
             <?php if ($notificationCount === 0): ?>
-                <div class="text-center text-gray-500 py-4">No new notifications.</div>
+                <div class="text-center text-gray-500 dark:text-gray-400 py-4">No new notifications.</div>
             <?php else: ?>
                 <?php foreach ($notifications as $notification): ?>
-                    <div class="border-2 border-black p-3">
-                        <div class="text-base text-black">
+                    <div class="border-2 border-black dark:border-gray-600 p-3">
+                        <div class="text-base text-black dark:text-white">
                             <span class="font-medium mr-1 <?php echo h($notification['title_color'] ?? ''); ?>">
                                 <?php echo $notification['emoji'] . ' ' . h($notification['title']); ?>:
                             </span><br>
