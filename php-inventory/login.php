@@ -33,13 +33,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Handle Remember Me
             if ($remember_me) {
-                // Set cookie for 30 days
-                setcookie('remembered_username', $email, time() + (86400 * 30), "/");
-                setcookie('remembered_role', $postedRole, time() + (86400 * 30), "/");
+                // Set cookie for 30 days with secure flags
+                $cookieOpts = [
+                    'expires' => time() + (86400 * 30),
+                    'path' => '/',
+                    'secure' => is_https_request(),
+                    'httponly' => true,
+                    'samesite' => 'Lax',
+                ];
+                setcookie('remembered_username', $email, $cookieOpts);
+                setcookie('remembered_role', $postedRole, $cookieOpts);
             } else {
                 // Clear cookies if unchecked
-                setcookie('remembered_username', '', time() - 3600, "/");
-                setcookie('remembered_role', '', time() - 3600, "/");
+                $clearOpts = [
+                    'expires' => time() - 3600,
+                    'path' => '/',
+                    'secure' => is_https_request(),
+                    'httponly' => true,
+                    'samesite' => 'Lax',
+                ];
+                setcookie('remembered_username', '', $clearOpts);
+                setcookie('remembered_role', '', $clearOpts);
             }
 
             session_regenerate_id(true);

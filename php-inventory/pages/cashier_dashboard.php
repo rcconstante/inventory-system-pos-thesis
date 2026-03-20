@@ -7,6 +7,8 @@ require_once '../includes/domain.php';
 
 require_login([APP_ROLE_CASHIER]);
 
+$cashierId = (int) current_user_id();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['return_sale'])) {
         try {
@@ -76,7 +78,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$cashierId = (int) current_user_id();
 $transactionPage = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = max(5, min(50, (int) ($_GET['per_page'] ?? 10)));
 $offset = ($transactionPage - 1) * $perPage;

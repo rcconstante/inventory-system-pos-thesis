@@ -160,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     p.price,
                     COALESCE(i.current_stock, 0) AS current_stock
                  FROM Products p
-                 INNER JOIN Inventory i ON i.product_id = p.product_id
+                 LEFT JOIN Inventory i ON i.product_id = p.product_id
                  WHERE p.product_id = :product_id
                  FOR UPDATE'
             );
@@ -811,6 +811,10 @@ include '../includes/header.php';
                             document.getElementById('pos-main-view')?.classList.add('hidden');
                             document.getElementById('pos-main-view')?.classList.remove('flex');
                         }
+
+                        // Re-execute inline scripts so event handlers work after DOM replacement
+                        document.querySelectorAll('script').forEach(function(oldScript) {
+                            var newScript = document.createElement('script');
                             Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
                             newScript.appendChild(document.createTextNode(oldScript.innerHTML));
                             oldScript.parentNode.replaceChild(newScript, oldScript);
