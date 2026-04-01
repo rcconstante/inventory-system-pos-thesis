@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS Products (
     brand VARCHAR(100),
     description TEXT,
     price DECIMAL(10, 2) NOT NULL,
+    retail_price DECIMAL(10, 2) DEFAULT NULL,
+    acquisition_cost DECIMAL(10, 2) DEFAULT NULL,
+    manufacturing_date DATE DEFAULT NULL,
+    expiration_date DATE DEFAULT NULL,
     category_id INT,
     product_type VARCHAR(50),
     specification TEXT,
@@ -98,12 +102,66 @@ CREATE TABLE IF NOT EXISTS Feature_Based_Match (
     FOREIGN KEY (alternative_product_id) REFERENCES Products(product_id) ON DELETE CASCADE
 );
 
+-- 10. Stock_Batch (FIFO batch tracking)
+CREATE TABLE IF NOT EXISTS Stock_Batch (
+    batch_id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    batch_number VARCHAR(50) NOT NULL,
+    acquisition_cost DECIMAL(10, 2) DEFAULT NULL,
+    manufacturing_date DATE DEFAULT NULL,
+    expiration_date DATE DEFAULT NULL,
+    quantity_received INT NOT NULL DEFAULT 0,
+    quantity_remaining INT NOT NULL DEFAULT 0,
+    date_received TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_depleted TINYINT(1) NOT NULL DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES Products(product_id) ON DELETE CASCADE,
+    INDEX idx_fifo_lookup (product_id, is_depleted, date_received)
+);
+
+-- 11. Sale_Item_Batch (tracks which batches were used per sale item)
+CREATE TABLE IF NOT EXISTS Sale_Item_Batch (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sale_item_id INT NOT NULL,
+    batch_id INT NOT NULL,
+    quantity_from_batch INT NOT NULL,
+    FOREIGN KEY (sale_item_id) REFERENCES Sale_Item(sale_item_id) ON DELETE CASCADE,
+    FOREIGN KEY (batch_id) REFERENCES Stock_Batch(batch_id) ON DELETE CASCADE
+);
+
 -- Migrate existing installs: add new columns if they don't exist yet
 ALTER TABLE User ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
 ALTER TABLE User ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE User ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT NULL;
 ALTER TABLE Category ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
 ALTER TABLE Sale ADD COLUMN IF NOT EXISTS cancel_reason VARCHAR(255) DEFAULT NULL;
+
+-- New columns for product enhancements
+ALTER TABLE Products ADD COLUMN IF NOT EXISTS retail_price DECIMAL(10, 2) DEFAULT NULL;
+ALTER TABLE Products ADD COLUMN IF NOT EXISTS acquisition_cost DECIMAL(10, 2) DEFAULT NULL;
+ALTER TABLE Products ADD COLUMN IF NOT EXISTS manufacturing_date DATE DEFAULT NULL;
+ALTER TABLE Products ADD COLUMN IF NOT EXISTS expiration_date DATE DEFAULT NULL;
+
+-- Migrate existing price to retail_price where not set
+UPDATE Products SET retail_price = price WHERE retail_price IS NULL;
+
+-- Migrate GCASH to E-WALLET in existing sales
+UPDATE Sale SET payment_method = 'E-WALLET' WHERE payment_method = 'GCASH';
+
+-- Create initial batches from existing inventory (one batch per product)
+INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted)
+SELECT
+    i.product_id,
+    CONCAT('INIT-', i.product_id),
+    p.acquisition_cost,
+    p.manufacturing_date,
+    i.expiry_date,
+    i.current_stock,
+    i.current_stock,
+    CASE WHEN i.current_stock <= 0 THEN 1 ELSE 0 END
+FROM Inventory i
+JOIN Products p ON p.product_id = i.product_id
+WHERE NOT EXISTS (SELECT 1 FROM Stock_Batch sb WHERE sb.product_id = i.product_id)
+AND i.current_stock > 0;
 
 -- Insert Default Roles
 INSERT IGNORE INTO Role (role_id, role_type) VALUES 

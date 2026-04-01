@@ -238,3 +238,134 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 
     return $recommendations;
 }
+
+// ─── Batch / FIFO Functions ────────────────────────────────────────────
+
+function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acquisitionCost = null, ?string $manufacturingDate = null, ?string $expirationDate = null): int
+{
+    $batchNumber = 'BATCH-' . $productId . '-' . date('YmdHis') . '-' . random_int(100, 999);
+
+    $statement = $pdo->prepare(
+        'INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted)
+         VALUES (:product_id, :batch_number, :acquisition_cost, :manufacturing_date, :expiration_date, :quantity_received, :quantity_remaining, 0)'
+    );
+    $statement->execute([
+        'product_id' => $productId,
+        'batch_number' => $batchNumber,
+        'acquisition_cost' => $acquisitionCost,
+        'manufacturing_date' => $manufacturingDate,
+        'expiration_date' => $expirationDate,
+        'quantity_received' => $quantity,
+        'quantity_remaining' => $quantity,
+    ]);
+
+    return (int) $pdo->lastInsertId();
+}
+
+function sync_inventory_from_batches(PDO $pdo, int $productId): void
+{
+    $statement = $pdo->prepare(
+        'SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0'
+    );
+    $statement->execute(['product_id' => $productId]);
+    $totalStock = (int) $statement->fetchColumn();
+
+    $update = $pdo->prepare('UPDATE Inventory SET current_stock = :stock WHERE product_id = :product_id');
+    $update->execute(['stock' => $totalStock, 'product_id' => $productId]);
+}
+
+function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleItemId): void
+{
+    $batchStatement = $pdo->prepare(
+        'SELECT batch_id, quantity_remaining
+         FROM Stock_Batch
+         WHERE product_id = :product_id AND is_depleted = 0
+           AND (expiration_date IS NULL OR expiration_date >= CURDATE())
+         ORDER BY date_received ASC, batch_id ASC
+         FOR UPDATE'
+    );
+    $batchStatement->execute(['product_id' => $productId]);
+    $batches = $batchStatement->fetchAll(PDO::FETCH_ASSOC);
+
+    $remaining = $quantity;
+    $saleItemBatchInsert = $pdo->prepare(
+        'INSERT INTO Sale_Item_Batch (sale_item_id, batch_id, quantity_from_batch) VALUES (:sale_item_id, :batch_id, :qty)'
+    );
+    $batchUpdate = $pdo->prepare(
+        'UPDATE Stock_Batch SET quantity_remaining = :qty_remaining, is_depleted = :is_depleted WHERE batch_id = :batch_id'
+    );
+
+    foreach ($batches as $batch) {
+        if ($remaining <= 0) {
+            break;
+        }
+
+        $batchId = (int) $batch['batch_id'];
+        $available = (int) $batch['quantity_remaining'];
+        $take = min($remaining, $available);
+
+        $newRemaining = $available - $take;
+        $isDepleted = $newRemaining <= 0 ? 1 : 0;
+
+        $batchUpdate->execute([
+            'qty_remaining' => $newRemaining,
+            'is_depleted' => $isDepleted,
+            'batch_id' => $batchId,
+        ]);
+
+        $saleItemBatchInsert->execute([
+            'sale_item_id' => $saleItemId,
+            'batch_id' => $batchId,
+            'qty' => $take,
+        ]);
+
+        $remaining -= $take;
+    }
+
+    if ($remaining > 0) {
+        throw new RuntimeException('Insufficient non-expired batch stock for product ID ' . $productId);
+    }
+
+    sync_inventory_from_batches($pdo, $productId);
+}
+
+function fetch_batches_for_product(PDO $pdo, int $productId): array
+{
+    $statement = $pdo->prepare(
+        'SELECT batch_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, date_received, is_depleted
+         FROM Stock_Batch
+         WHERE product_id = :product_id
+         ORDER BY date_received ASC, batch_id ASC'
+    );
+    $statement->execute(['product_id' => $productId]);
+    return $statement->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function restore_stock_to_batches(PDO $pdo, int $saleItemId): void
+{
+    $statement = $pdo->prepare(
+        'SELECT sib.batch_id, sib.quantity_from_batch, sb.product_id
+         FROM Sale_Item_Batch sib
+         JOIN Stock_Batch sb ON sb.batch_id = sib.batch_id
+         WHERE sib.sale_item_id = :sale_item_id'
+    );
+    $statement->execute(['sale_item_id' => $saleItemId]);
+    $entries = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+    $batchUpdate = $pdo->prepare(
+        'UPDATE Stock_Batch SET quantity_remaining = quantity_remaining + :qty, is_depleted = 0 WHERE batch_id = :batch_id'
+    );
+
+    $productIds = [];
+    foreach ($entries as $entry) {
+        $batchUpdate->execute([
+            'qty' => $entry['quantity_from_batch'],
+            'batch_id' => $entry['batch_id'],
+        ]);
+        $productIds[] = (int) $entry['product_id'];
+    }
+
+    foreach (array_unique($productIds) as $pid) {
+        sync_inventory_from_batches($pdo, $pid);
+    }
+}

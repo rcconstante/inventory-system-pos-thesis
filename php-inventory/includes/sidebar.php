@@ -14,6 +14,7 @@ $menuItems = match ($currentRoleId) {
         ['label' => 'DASHBOARD', 'href' => 'pages/admin_dashboard.php', 'icon' => $iconDashboard],
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',        'icon' => $iconCategory],
         ['label' => 'PRODUCTS',  'href' => 'pages/products.php',        'icon' => $iconProducts],
+        ['label' => 'POS',       'href' => 'pages/pos.php',             'icon' => $iconPos],
         ['label' => 'USERS',     'href' => 'pages/users.php',           'icon' => $iconUsers],
         ['label' => 'REPORTS',   'href' => 'pages/records.php',         'icon' => $iconRecords],
     ],

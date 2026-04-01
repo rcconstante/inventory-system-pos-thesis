@@ -47,17 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $updateSale = $pdo->prepare("UPDATE Sale SET status = 'RETURNED' WHERE sale_id = ?");
             $updateSale->execute([$saleId]);
             
-            // Add items back to inventory
-            $itemsStmt = $pdo->prepare("SELECT product_id, quantity FROM Sale_Item WHERE sale_id = ?");
+            // Restore items to inventory via FIFO batch tracking
+            $itemsStmt = $pdo->prepare("SELECT sale_item_id, product_id, quantity FROM Sale_Item WHERE sale_id = ?");
             $itemsStmt->execute([$saleId]);
             $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
             
-            $updateInv = $pdo->prepare("UPDATE Inventory SET current_stock = current_stock + ? WHERE product_id = ?");
             foreach ($items as $item) {
-                $updateInv->execute([$item['quantity'], $item['product_id']]);
+                restore_stock_to_batches($pdo, (int)$item['sale_item_id']);
             }
             
-            // If we had a returns table we would log the reason here.
+            sync_reorder_alerts_for_catalog($pdo);
             
             $pdo->commit();
             set_flash('success', 'Transaction #' . $saleId . ' successfully returned.');
@@ -246,7 +245,10 @@ include '../includes/header.php';
             
             <div class="flex justify-between items-center">
                 <div class="text-sm font-medium">Thank You :)</div>
-                <button type="button" id="rm-return-btn" onclick="openReturnModal()" class="border border-black dark:border-gray-400 px-6 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors uppercase tracking-widest">RETURN</button>
+                <div class="flex gap-3">
+                    <button type="button" onclick="printDashReceipt()" class="border border-black dark:border-gray-400 px-6 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors uppercase tracking-widest">PRINT</button>
+                    <button type="button" id="rm-return-btn" onclick="openReturnModal()" class="border border-black dark:border-gray-400 px-6 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors uppercase tracking-widest">RETURN</button>
+                </div>
             </div>
         </div>
     </div>
@@ -332,6 +334,26 @@ include '../includes/header.php';
     function closeReturnModal() {
         document.getElementById('returnModal').classList.add('hidden');
         document.getElementById('returnModal').classList.remove('flex');
+    }
+
+    function printDashReceipt() {
+        var receiptEl = document.querySelector('#receiptModal .w-\\[500px\\]');
+        if (!receiptEl) return;
+        var printWin = window.open('', '_blank', 'width=500,height=700');
+        printWin.document.write('<html><head><title>Receipt</title><style>');
+        printWin.document.write('body{font-family:monospace,sans-serif;margin:0;padding:20px;font-size:12px;color:#000}');
+        printWin.document.write('table{width:100%;border-collapse:collapse}th,td{padding:6px 4px;text-align:left}');
+        printWin.document.write('th{border-bottom:1px solid #000;font-weight:bold}td{border-bottom:1px dashed #ccc}');
+        printWin.document.write('.text-center{text-align:center}.text-right{text-align:right}');
+        printWin.document.write('.font-bold,.font-medium{font-weight:bold}.text-sm{font-size:12px}.text-xl{font-size:16px}');
+        printWin.document.write('.uppercase{text-transform:uppercase}.tracking-widest{letter-spacing:4px}');
+        printWin.document.write('@media print{button{display:none !important}}');
+        printWin.document.write('</style></head><body>');
+        printWin.document.write(receiptEl.innerHTML);
+        printWin.document.write('</body></html>');
+        printWin.document.close();
+        printWin.focus();
+        printWin.print();
     }
 </script>
 <?php include '../includes/footer.php'; ?>

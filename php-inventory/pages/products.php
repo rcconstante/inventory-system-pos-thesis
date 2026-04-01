@@ -26,6 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $brand = trim((string) ($_POST['brand'] ?? ''));
             $description = trim((string) ($_POST['description'] ?? ''));
             $price = (float) ($_POST['price'] ?? 0);
+            $retailPrice = ($_POST['retail_price'] ?? '') !== '' ? (float) $_POST['retail_price'] : null;
+            $acquisitionCost = ($_POST['acquisition_cost'] ?? '') !== '' ? (float) $_POST['acquisition_cost'] : null;
+            $manufacturingDate = !empty($_POST['manufacturing_date']) ? $_POST['manufacturing_date'] : null;
+            $expirationDate = !empty($_POST['expiry_date']) ? $_POST['expiry_date'] : null;
             $productType = trim((string) ($_POST['product_type'] ?? ''));
             $specification = trim((string) ($_POST['specification'] ?? ''));
             $compatibility = trim((string) ($_POST['compatibility'] ?? ''));
@@ -54,6 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         brand,
                         description,
                         price,
+                        retail_price,
+                        acquisition_cost,
+                        manufacturing_date,
+                        expiration_date,
                         category_id,
                         product_type,
                         specification,
@@ -63,6 +71,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :brand,
                         :description,
                         :price,
+                        :retail_price,
+                        :acquisition_cost,
+                        :manufacturing_date,
+                        :expiration_date,
                         :category_id,
                         :product_type,
                         :specification,
@@ -74,6 +86,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'brand' => $brand,
                     'description' => $description,
                     'price' => $price,
+                    'retail_price' => $retailPrice,
+                    'acquisition_cost' => $acquisitionCost,
+                    'manufacturing_date' => $manufacturingDate,
+                    'expiration_date' => $expirationDate,
                     'category_id' => $categoryId,
                     'product_type' => $productType,
                     'specification' => $specification,
@@ -93,6 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'expiry_date' => $expiryDate,
                 ]);
 
+                // Create initial batch
+                if ($currentStock > 0) {
+                    create_stock_batch($pdo, $productId, $currentStock, $acquisitionCost, $manufacturingDate, $expiryDate);
+                }
+
                 set_flash('success', 'Product created successfully.');
             } else {
                 $updateProduct = $pdo->prepare(
@@ -101,6 +122,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          brand = :brand,
                          description = :description,
                          price = :price,
+                         retail_price = :retail_price,
+                         acquisition_cost = :acquisition_cost,
+                         manufacturing_date = :manufacturing_date,
+                         expiration_date = :expiration_date,
                          category_id = :category_id,
                          product_type = :product_type,
                          specification = :specification,
@@ -112,6 +137,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'brand' => $brand,
                     'description' => $description,
                     'price' => $price,
+                    'retail_price' => $retailPrice,
+                    'acquisition_cost' => $acquisitionCost,
+                    'manufacturing_date' => $manufacturingDate,
+                    'expiration_date' => $expirationDate,
                     'category_id' => $categoryId,
                     'product_type' => $productType,
                     'specification' => $specification,
@@ -195,6 +224,8 @@ $categoriesStatement = $pdo->query('SELECT * FROM Category ORDER BY category_nam
 $categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
 
 $selectedCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
+$searchTerm = trim((string) ($_GET['search'] ?? ''));
+
 $productsQuery = "
     SELECT
         p.*,
@@ -212,16 +243,31 @@ $productsQuery = "
         JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
         GROUP BY si.product_id
     ) si ON p.product_id = si.product_id
+    WHERE 1=1
 ";
 
+$queryParams = [];
 if ($selectedCategoryId > 0) {
-    $productsQuery .= ' WHERE p.category_id = :category_id';
+    $productsQuery .= ' AND p.category_id = :category_id';
+    $queryParams['category_id'] = $selectedCategoryId;
+}
+if ($searchTerm !== '') {
+    $productsQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5)';
+    $queryParams['st1'] = '%' . $searchTerm . '%';
+    $queryParams['st2'] = '%' . $searchTerm . '%';
+    $queryParams['st3'] = '%' . $searchTerm . '%';
+    $queryParams['st4'] = '%' . $searchTerm . '%';
+    $queryParams['st5'] = '%' . $searchTerm . '%';
 }
 
 $productsQuery .= ' ORDER BY p.product_name ASC';
 $productsStatement = $pdo->prepare($productsQuery);
-if ($selectedCategoryId > 0) {
-    $productsStatement->bindValue(':category_id', $selectedCategoryId, PDO::PARAM_INT);
+foreach ($queryParams as $param => $value) {
+    if ($param === 'category_id') {
+        $productsStatement->bindValue(':category_id', $value, PDO::PARAM_INT);
+    } else {
+        $productsStatement->bindValue(':' . $param, $value, PDO::PARAM_STR);
+    }
 }
 $productsStatement->execute();
 $products = $productsStatement->fetchAll(PDO::FETCH_ASSOC);
@@ -239,7 +285,7 @@ include '../includes/header.php';
 ?>
 
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-    <form method="GET" class="flex items-center gap-4">
+    <form method="GET" class="flex items-center gap-4 flex-wrap">
         <span class="text-sm font-medium">Stock Inventory</span>
         <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
             <option value="0">All Categories</option>
@@ -249,9 +295,14 @@ include '../includes/header.php';
                 </option>
             <?php endforeach; ?>
         </select>
+        <div class="relative">
+            <input type="text" name="search" value="<?php echo h($searchTerm); ?>" placeholder="Search products..." class="rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 pl-9 pr-3 py-2 text-sm w-64 focus:outline-none focus:ring focus:ring-blue-500">
+            <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <button type="submit" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Search</button>
     </form>
 
-    <?php if (current_role_id() === APP_ROLE_STAFF): ?>
+    <?php if ($canManage): ?>
         <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
@@ -290,14 +341,18 @@ include '../includes/header.php';
 
                 $productRecommendations = $recommendations[$productId] ?? [];
                 ?>
-                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer" onclick="openProductDetailModal(<?php echo $productId; ?>)">
                     <td class="border border-black dark:border-gray-600 p-4 text-center font-medium dark:text-gray-100">
                         P<?php echo str_pad((string)$productId, 3, '0', STR_PAD_LEFT); ?>
                     </td>
                     <td class="border border-black dark:border-gray-600 p-4 text-left">
                         <div class="font-medium text-black dark:text-gray-100"><?php echo h($product['product_name']); ?></div>
                         <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            <?php echo h($product['product_type'] !== '' ? $product['product_type'] : 'General product'); ?>
+                            <?php echo h($product['brand'] ?: 'No brand'); ?>
+                            <?php if ($product['product_type'] !== ''): ?>
+                                <span class="mx-1">|</span>
+                                <?php echo h($product['product_type']); ?>
+                            <?php endif; ?>
                             <?php if ($product['compatibility'] !== ''): ?>
                                 <span class="mx-1">|</span>
                                 <?php echo h($product['compatibility']); ?>
@@ -305,12 +360,12 @@ include '../includes/header.php';
                         </div>
                     </td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['category_name'] ?? 'N/A'); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h(money_format_php((float) $product['price'])); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['expiry_date'] ? date('F d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h((string) $currentStock); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100">&#8369;<?php echo h(money_format_php((float) $product['price'])); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['expiry_date'] ? date('M d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center <?php echo $currentStock <= $minStockLevel && $minStockLevel > 0 ? 'text-red-600 font-bold' : 'text-black dark:text-gray-100'; ?>"><?php echo h((string) $currentStock); ?></td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h((string) $salesCount); ?></td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100">
-                        <span class="text-xs font-semibold uppercase"><?php echo h($statusLabel); ?></span>
+                        <span class="text-xs font-semibold uppercase <?php echo $statusLabel === 'FAST MOVING' ? 'text-green-600' : 'text-orange-500'; ?>"><?php echo h($statusLabel); ?></span>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -321,49 +376,14 @@ include '../includes/header.php';
 
 <?php if ($canManage): ?>
     <div id="addProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-        <div class="w-full max-w-xl rounded-lg bg-white dark:bg-gray-800 p-8 shadow-xl dark:text-gray-100">
+        <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-8 shadow-xl dark:text-gray-100">
             <h2 class="text-xl font-bold mb-6">ADD PRODUCT</h2>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
                 <?php echo csrf_field(); ?>
-                <!-- Hidden fields required by backend but not shown in simplified form -->
-                <input type="hidden" name="description" value="">
-                <input type="hidden" name="product_type" value="">
-                <input type="hidden" name="specification" value="">
-                <input type="hidden" name="min_stock_level" value="0">
-                <div class="grid grid-cols-2 gap-x-6 gap-y-4 mb-8">
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Category</label>
-                        <select name="category_id" required class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                            <option value="">Select Category</option>
-                            <?php foreach ($categories as $category): ?>
-                                <option value="<?php echo h((string) $category['category_id']); ?>"><?php echo h($category['category_name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Product Name</label>
-                        <input type="text" name="product_name" required class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Brand Name</label>
-                        <input type="text" name="brand" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Specification Compatibility</label>
-                        <input type="text" name="compatibility" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Price</label>
-                        <input type="number" name="price" required min="0" step="0.01" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1 dark:text-gray-200">Quantity</label>
-                        <input type="number" name="current_stock" required min="0" class="w-full rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring focus:ring-blue-500">
-                    </div>
-                </div>
-                <div class="flex justify-end gap-3">
+                <?php $formPrefix = ''; include __DIR__ . '/product_form_fields.php'; ?>
+                <div class="flex justify-end gap-3 mt-6">
                     <button type="button" onclick="toggleProductModal('addProductModal', false)" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Close</button>
-                    <button type="submit" name="add_product" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Create</button>
+                    <button type="submit" name="add_product" class="rounded bg-black dark:bg-gray-600 px-6 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:hover:bg-gray-500">Create</button>
                 </div>
             </form>
         </div>
@@ -407,6 +427,18 @@ include '../includes/header.php';
     <?php endif; ?>
 <?php endif; ?>
 
+<!-- Product Detail Modal -->
+<div id="productDetailModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col" style="max-height:90vh;">
+        <div class="flex items-center justify-between border-b dark:border-gray-700 p-4">
+            <h3 id="detailProductTitle" class="text-lg font-bold dark:text-white"></h3>
+            <button type="button" onclick="toggleProductModal('productDetailModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
+        </div>
+        <div id="detailProductContent" class="p-4 overflow-y-auto dark:text-gray-100"></div>
+        <div id="detailProductActions" class="flex justify-end gap-2 border-t dark:border-gray-700 p-4"></div>
+    </div>
+</div>
+
 <script>
     function toggleProductModal(modalId, shouldOpen) {
         var modal = document.getElementById(modalId);
@@ -431,6 +463,9 @@ include '../includes/header.php';
         document.getElementById('edit_brand').value = button.dataset.brand || '';
         document.getElementById('edit_description').value = button.dataset.description || '';
         document.getElementById('edit_price').value = button.dataset.price || '';
+        document.getElementById('edit_retail_price').value = button.dataset.retailPrice || '';
+        document.getElementById('edit_acquisition_cost').value = button.dataset.acquisitionCost || '';
+        document.getElementById('edit_manufacturing_date').value = button.dataset.manufacturingDate || '';
         document.getElementById('edit_product_type').value = button.dataset.productType || '';
         document.getElementById('edit_specification').value = button.dataset.specification || '';
         document.getElementById('edit_compatibility').value = button.dataset.compatibility || '';
@@ -444,6 +479,144 @@ include '../includes/header.php';
         document.getElementById('deleteProductId').value = button.dataset.productId || '';
         document.getElementById('deleteProductName').textContent = button.dataset.productName || '';
         toggleProductModal('deleteProductModal', true);
+    }
+
+    // Product Detail Modal
+    var productData = <?php echo json_encode(array_map(function($p) use ($pdo, $recommendations, $canManage) {
+        $batches = fetch_batches_for_product($pdo, (int)$p['product_id']);
+        $recs = $recommendations[(int)$p['product_id']] ?? [];
+        return [
+            'id' => (int)$p['product_id'],
+            'name' => $p['product_name'],
+            'brand' => $p['brand'] ?? '',
+            'category' => $p['category_name'] ?? 'N/A',
+            'category_id' => (int)($p['category_id'] ?? 0),
+            'description' => $p['description'] ?? '',
+            'price' => (float)$p['price'],
+            'retail_price' => $p['retail_price'] !== null ? (float)$p['retail_price'] : null,
+            'acquisition_cost' => $p['acquisition_cost'] !== null ? (float)$p['acquisition_cost'] : null,
+            'manufacturing_date' => $p['manufacturing_date'] ?? '',
+            'expiration_date' => $p['expiration_date'] ?? '',
+            'product_type' => $p['product_type'] ?? '',
+            'specification' => $p['specification'] ?? '',
+            'compatibility' => $p['compatibility'] ?? '',
+            'current_stock' => (int)$p['current_stock'],
+            'min_stock_level' => (int)$p['min_stock_level'],
+            'expiry_date' => $p['expiry_date'] ?? '',
+            'sales_count' => (int)($p['sales_count'] ?? 0),
+            'batches' => array_map(function($b) {
+                return [
+                    'batch_number' => $b['batch_number'],
+                    'qty_remaining' => (int)$b['quantity_remaining'],
+                    'qty_received' => (int)$b['quantity_received'],
+                    'acquisition_cost' => $b['acquisition_cost'] !== null ? (float)$b['acquisition_cost'] : null,
+                    'manufacturing_date' => $b['manufacturing_date'] ?? '',
+                    'expiration_date' => $b['expiration_date'] ?? '',
+                    'date_received' => $b['date_received'] ?? '',
+                    'is_depleted' => (int)$b['is_depleted'],
+                ];
+            }, $batches),
+            'recommendations' => array_map(function($r) {
+                return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
+            }, array_slice($recs, 0, 5)),
+            'can_manage' => $canManage,
+        ];
+    }, $products)); ?>;
+
+    function openProductDetailModal(productId) {
+        var product = productData.find(function(p) { return p.id === productId; });
+        if (!product) return;
+
+        var html = '<div class="space-y-4">';
+        html += '<div class="grid grid-cols-2 gap-4 text-sm">';
+        html += '<div><span class="font-bold">Product ID:</span> P' + String(product.id).padStart(3, '0') + '</div>';
+        html += '<div><span class="font-bold">Category:</span> ' + escapeHtml(product.category) + '</div>';
+        html += '<div><span class="font-bold">Brand:</span> ' + escapeHtml(product.brand || 'N/A') + '</div>';
+        html += '<div><span class="font-bold">Type:</span> ' + escapeHtml(product.product_type || 'N/A') + '</div>';
+        html += '<div><span class="font-bold">Selling Price:</span> ₱' + product.price.toFixed(2) + '</div>';
+        if (product.retail_price !== null) html += '<div><span class="font-bold">Retail Price:</span> ₱' + product.retail_price.toFixed(2) + '</div>';
+        if (product.acquisition_cost !== null) html += '<div><span class="font-bold">Acquisition Cost:</span> ₱' + product.acquisition_cost.toFixed(2) + '</div>';
+        html += '<div><span class="font-bold">Stock:</span> ' + product.current_stock + '</div>';
+        html += '<div><span class="font-bold">Critical Stock:</span> ' + product.min_stock_level + '</div>';
+        html += '<div><span class="font-bold">Sales Count:</span> ' + product.sales_count + '</div>';
+        if (product.manufacturing_date) html += '<div><span class="font-bold">Mfg Date:</span> ' + product.manufacturing_date + '</div>';
+        if (product.expiry_date) html += '<div><span class="font-bold">Exp Date:</span> ' + product.expiry_date + '</div>';
+        html += '</div>';
+
+        if (product.compatibility) html += '<div class="text-sm"><span class="font-bold">Compatibility:</span> ' + escapeHtml(product.compatibility) + '</div>';
+        if (product.specification) html += '<div class="text-sm"><span class="font-bold">Specification:</span> ' + escapeHtml(product.specification) + '</div>';
+        if (product.description) html += '<div class="text-sm"><span class="font-bold">Description:</span> ' + escapeHtml(product.description) + '</div>';
+
+        // Batches
+        html += '<div class="mt-4"><h4 class="font-bold text-sm mb-2 uppercase">Batch Inventory (FIFO)</h4>';
+        if (product.batches.length === 0) {
+            html += '<div class="text-sm text-gray-500">No batches recorded.</div>';
+        } else {
+            html += '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse border border-gray-300 dark:border-gray-600">';
+            html += '<thead><tr class="bg-gray-100 dark:bg-gray-700"><th class="border border-gray-300 dark:border-gray-600 p-2">Batch #</th><th class="border border-gray-300 dark:border-gray-600 p-2">Qty</th><th class="border border-gray-300 dark:border-gray-600 p-2">Cost</th><th class="border border-gray-300 dark:border-gray-600 p-2">Mfg Date</th><th class="border border-gray-300 dark:border-gray-600 p-2">Exp Date</th><th class="border border-gray-300 dark:border-gray-600 p-2">Status</th></tr></thead><tbody>';
+            product.batches.forEach(function(b) {
+                var statusClass = b.is_depleted ? 'text-red-500' : 'text-green-600';
+                var statusText = b.is_depleted ? 'Depleted' : 'Active';
+                html += '<tr><td class="border border-gray-300 dark:border-gray-600 p-2">' + escapeHtml(b.batch_number) + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + b.qty_remaining + '/' + b.qty_received + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.acquisition_cost !== null ? '₱' + b.acquisition_cost.toFixed(2) : 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.manufacturing_date || 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.expiration_date || 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center ' + statusClass + ' font-bold">' + statusText + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+        html += '</div>';
+
+        // Recommendations
+        if (product.recommendations.length > 0) {
+            html += '<div class="mt-4"><h4 class="font-bold text-sm mb-2 uppercase">Recommended Alternatives</h4>';
+            html += '<div class="space-y-1">';
+            product.recommendations.forEach(function(r) {
+                html += '<div class="text-xs flex justify-between border-b dark:border-gray-600 pb-1"><span>' + escapeHtml(r.name) + ' (' + escapeHtml(r.brand) + ')</span><span>₱' + r.price.toFixed(2) + ' | Score: ' + r.score.toFixed(2) + '</span></div>';
+            });
+            html += '</div></div>';
+        }
+
+        html += '</div>';
+
+        document.getElementById('detailProductTitle').textContent = product.name;
+        document.getElementById('detailProductContent').innerHTML = html;
+
+        // Show/hide action buttons
+        var actionsDiv = document.getElementById('detailProductActions');
+        if (product.can_manage) {
+            actionsDiv.innerHTML = '<button type="button" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500" ' +
+                'data-product-id="' + product.id + '" ' +
+                'data-product-name="' + escapeAttr(product.name) + '" ' +
+                'data-category-id="' + product.category_id + '" ' +
+                'data-brand="' + escapeAttr(product.brand) + '" ' +
+                'data-description="' + escapeAttr(product.description) + '" ' +
+                'data-price="' + product.price + '" ' +
+                'data-retail-price="' + (product.retail_price !== null ? product.retail_price : '') + '" ' +
+                'data-acquisition-cost="' + (product.acquisition_cost !== null ? product.acquisition_cost : '') + '" ' +
+                'data-manufacturing-date="' + escapeAttr(product.manufacturing_date) + '" ' +
+                'data-product-type="' + escapeAttr(product.product_type) + '" ' +
+                'data-specification="' + escapeAttr(product.specification) + '" ' +
+                'data-compatibility="' + escapeAttr(product.compatibility) + '" ' +
+                'data-current-stock="' + product.current_stock + '" ' +
+                'data-min-stock-level="' + product.min_stock_level + '" ' +
+                'data-expiry-date="' + escapeAttr(product.expiry_date) + '" ' +
+                'onclick="toggleProductModal(\'productDetailModal\', false); openEditProductModal(this);">Edit Product</button>';
+        } else {
+            actionsDiv.innerHTML = '';
+        }
+
+        toggleProductModal('productDetailModal', true);
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(text || ''));
+        return div.innerHTML;
+    }
+    function escapeAttr(text) {
+        return (text || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 </script>
 

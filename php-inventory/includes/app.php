@@ -246,6 +246,7 @@ function default_preferences(): array
     ];
 }
 
+
 function get_preferences(): array
 {
     if (!isset($_SESSION['preferences']) || !is_array($_SESSION['preferences'])) {
@@ -257,7 +258,7 @@ function get_preferences(): array
             if (is_array($decoded)) {
                 $preferences['show_recommendations'] = !empty($decoded['show_recommendations']);
                 $paymentMethod = strtoupper((string) ($decoded['default_payment_method'] ?? 'CASH'));
-                $preferences['default_payment_method'] = in_array($paymentMethod, ['CASH', 'GCASH', 'CARD'], true)
+                $preferences['default_payment_method'] = in_array($paymentMethod, ['CASH', 'E-WALLET', 'CARD'], true)
                     ? $paymentMethod
                     : 'CASH';
             }
@@ -275,7 +276,7 @@ function save_preferences(array $preferences): void
     $normalized['show_recommendations'] = !empty($preferences['show_recommendations']);
 
     $paymentMethod = strtoupper((string) ($preferences['default_payment_method'] ?? 'CASH'));
-    $normalized['default_payment_method'] = in_array($paymentMethod, ['CASH', 'GCASH', 'CARD'], true)
+    $normalized['default_payment_method'] = in_array($paymentMethod, ['CASH', 'E-WALLET', 'CARD'], true)
         ? $paymentMethod
         : 'CASH';
 

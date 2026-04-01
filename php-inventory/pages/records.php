@@ -143,7 +143,13 @@ include '../includes/header.php';
     </form>
 <?php endif; ?>
 
-<div class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
+<!-- Print / PDF Buttons -->
+<div class="mb-4 flex gap-3">
+    <button type="button" onclick="printReport()" class="rounded border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-100">Print</button>
+    <button type="button" onclick="exportPDF()" class="rounded border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-100">Export PDF</button>
+</div>
+
+<div id="reportContent" class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
     <?php if ($activeTab === 'critical_stocks'): ?>
         <div class="grid grid-cols-7 gap-4 border-b border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4 text-xs font-medium uppercase dark:text-gray-300">
             <div>NO</div>
@@ -214,5 +220,39 @@ include '../includes/header.php';
         <?php endforeach; ?>
     <?php endif; ?>
 </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+function printReport() {
+    var content = document.getElementById('reportContent');
+    var printWin = window.open('', '_blank', 'width=900,height=700');
+    printWin.document.write('<html><head><title>Report - <?php echo h($tabs[$activeTab]); ?></title>');
+    printWin.document.write('<style>body{font-family:sans-serif;margin:20px;font-size:12px}h2{margin-bottom:10px}');
+    printWin.document.write('.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:8px;border-bottom:1px solid #ccc}');
+    printWin.document.write('.grid div{overflow:hidden;text-overflow:ellipsis}');
+    printWin.document.write('.text-xs{font-size:10px;font-weight:bold;text-transform:uppercase}');
+    printWin.document.write('.text-sm{font-size:12px}.font-semibold{font-weight:600}.text-red-600{color:#dc2626}');
+    printWin.document.write('@media print{body{margin:0}}</style></head><body>');
+    printWin.document.write('<h2><?php echo h($tabs[$activeTab]); ?> Report</h2>');
+    printWin.document.write('<p style="margin-bottom:12px;font-size:11px">Period: <?php echo h($dateFrom); ?> to <?php echo h($dateTo); ?></p>');
+    printWin.document.write(content.innerHTML);
+    printWin.document.write('</body></html>');
+    printWin.document.close();
+    printWin.focus();
+    printWin.print();
+}
+
+function exportPDF() {
+    var content = document.getElementById('reportContent');
+    var opt = {
+        margin: 10,
+        filename: '<?php echo h($activeTab); ?>_report_<?php echo date('Y-m-d'); ?>.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+    };
+    html2pdf().set(opt).from(content).save();
+}
+</script>
 
 <?php include '../includes/footer.php'; ?>

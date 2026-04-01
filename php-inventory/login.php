@@ -9,15 +9,12 @@ $flashMessages = pull_flash_messages();
 
 // Retrieve remembered username if available
 $remembered_username = $_COOKIE['remembered_username'] ?? '';
-$remembered_role = $_COOKIE['remembered_role'] ?? 'admin';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf_or_fail('login.php');
 
     $email = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
-    $postedRole = strtolower(trim((string) ($_POST['role'] ?? 'admin')));
-    $selectedRoleId = role_slug_to_id($postedRole) ?? APP_ROLE_ADMIN;
     $remember_me = isset($_POST['remember_me']);
 
     $statement = $pdo->prepare('SELECT * FROM User WHERE email = :email OR username = :username LIMIT 1');
@@ -27,13 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ]);
     $user = $statement->fetch(PDO::FETCH_ASSOC);
 
-    if ($user && password_verify($password, (string) $user['password']) && (int) $user['role_id'] === $selectedRoleId) {
+    if ($user && password_verify($password, (string) $user['password'])) {
         if (empty($user['is_active'])) {
             $error = 'Your account has been deactivated. Please contact an administrator.';
         } else {
             // Handle Remember Me
             if ($remember_me) {
-                // Set cookie for 30 days with secure flags
                 $cookieOpts = [
                     'expires' => time() + (86400 * 30),
                     'path' => '/',
@@ -42,9 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'samesite' => 'Lax',
                 ];
                 setcookie('remembered_username', $email, $cookieOpts);
-                setcookie('remembered_role', $postedRole, $cookieOpts);
             } else {
-                // Clear cookies if unchecked
                 $clearOpts = [
                     'expires' => time() - 3600,
                     'path' => '/',
@@ -53,7 +47,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'samesite' => 'Lax',
                 ];
                 setcookie('remembered_username', '', $clearOpts);
-                setcookie('remembered_role', '', $clearOpts);
             }
 
             session_regenerate_id(true);
@@ -61,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to(dashboard_path_for_role((int) $user['role_id']));
         }
     } else {
-        $error = 'Invalid credentials for the selected role.';
+        $error = 'Invalid username or password.';
     }
 }
 $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
@@ -200,16 +193,6 @@ $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
             <!-- Form -->
             <form method="POST" action="<?php echo h(app_url('login.php')); ?>" class="w-full max-w-md space-y-4">
                 <?php echo csrf_field(); ?>
-                
-                <!-- Role Selector -->
-                <div>
-                    <label class="block text-white text-sm mb-1">Role</label>
-                    <select name="role" required class="w-full px-4 py-3 border border-gray-300 rounded bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23374151%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[position:right_1rem_center]">
-                        <option value="admin" <?php echo $remembered_role === 'admin' ? 'selected' : ''; ?>>ADMIN</option>
-                        <option value="cashier" <?php echo $remembered_role === 'cashier' ? 'selected' : ''; ?>>CASHIER</option>
-                        <option value="staff" <?php echo $remembered_role === 'staff' ? 'selected' : ''; ?>>STAFF</option>
-                    </select>
-                </div>
 
                 <!-- Email/Username -->
                 <div>

@@ -5,7 +5,7 @@ require_once '../includes/app.php';
 require_once '../includes/config.php';
 require_once '../includes/domain.php';
 
-require_login([APP_ROLE_CASHIER]);
+require_login([APP_ROLE_ADMIN, APP_ROLE_CASHIER]);
 
 if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
@@ -66,48 +66,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
             
             set_flash('success', 'Product added to cart.');
-        } elseif (isset($_POST['add_multiple_to_cart'])) {
-            $productIds = $_POST['selected_products'] ?? [];
-            if (!is_array($productIds) || empty($productIds)) {
-                throw new RuntimeException('No products selected.');
-            }
-            
-            $addedCount = 0;
-            $productStatement = $pdo->prepare('SELECT p.product_id, p.product_name, p.brand, p.price, COALESCE(i.current_stock, 0) AS current_stock FROM Products p LEFT JOIN Inventory i ON i.product_id = p.product_id WHERE p.product_id = :product_id LIMIT 1');
-
-            foreach ($productIds as $pId) {
-                $productId = (int) $pId;
-                $quantity = 1;
-                
-                $productStatement->execute(['product_id' => $productId]);
-                $product = $productStatement->fetch(PDO::FETCH_ASSOC);
-                
-                if ($product && (int)$product['current_stock'] > 0) {
-                    $availableStock = (int) $product['current_stock'];
-                    $existingQuantity = isset($_SESSION['cart'][$productId]['qty']) ? (int) $_SESSION['cart'][$productId]['qty'] : 0;
-                    $requestedTotalQuantity = $existingQuantity + $quantity;
-                    
-                    if ($requestedTotalQuantity <= $availableStock) {
-                        $_SESSION['cart'][$productId] = [
-                            'name' => $product['product_name'],
-                            'brand' => $product['brand'] ?? '',
-                            'price' => (float) $product['price'],
-                            'qty' => $requestedTotalQuantity,
-                        ];
-                        $addedCount++;
-                    }
-                }
-            }
-            
-            if ($addedCount > 0) {
-                set_flash('success', "$addedCount product(s) added to cart.");
-            } else {
-                set_flash('error', 'No products were added. Items may be out of stock or quantity exceeds available stock.');
-            }
-            
-            $redirectUrl = 'pos.php' . (isset($_GET['q']) ? '?q=' . urlencode($_GET['q']) : '');
-            redirect_to('pages/' . basename($redirectUrl));
-            
         } elseif (isset($_POST['update_cart_qty'])) {
             $productId = (int) ($_POST['product_id'] ?? 0);
             $action = $_POST['action'] ?? '';
@@ -145,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $paymentMethod = strtoupper((string) ($_POST['payment_method'] ?? preferred_payment_method()));
-            if (!in_array($paymentMethod, ['CASH', 'GCASH', 'CARD'], true)) {
+            if (!in_array($paymentMethod, ['CASH', 'E-WALLET', 'CARD'], true)) {
                 throw new RuntimeException('Please select a valid payment method.');
             }
 
@@ -211,11 +169,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'INSERT INTO Sale_Item (sale_id, product_id, quantity, selling_price, subtotal)
                  VALUES (:sale_id, :product_id, :quantity, :selling_price, :subtotal)'
             );
-            $inventoryUpdateStatement = $pdo->prepare(
-                'UPDATE Inventory
-                 SET current_stock = current_stock - :quantity
-                 WHERE product_id = :product_id'
-            );
 
             foreach ($validatedItems as $validatedItem) {
                 $saleItemStatement->execute([
@@ -225,11 +178,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'selling_price' => $validatedItem['price'],
                     'subtotal' => $validatedItem['subtotal'],
                 ]);
+                $saleItemId = (int) $pdo->lastInsertId();
 
-                $inventoryUpdateStatement->execute([
-                    'quantity' => $validatedItem['quantity'],
-                    'product_id' => $validatedItem['product_id'],
-                ]);
+                // FIFO batch deduction
+                deduct_stock_fifo($pdo, $validatedItem['product_id'], $validatedItem['quantity'], $saleItemId);
             }
 
             sync_reorder_alerts_for_catalog($pdo);
@@ -355,47 +307,37 @@ include '../includes/header.php';
         </div>
         
         <!-- Table -->
-        <div class="flex-1 overflow-auto bg-white dark:bg-gray-900 pb-24">
-            <form id="pos-form" method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>">
-                <?php echo csrf_field(); ?>
-                <table class="w-full text-left border-collapse">
-                    <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
-                        <tr>
-                            <th class="py-4 px-6 w-12 border-b border-black dark:border-black"></th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">NO.</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PCODE</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">CATEGORY</th>
-                            <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
+        <div class="flex-1 overflow-auto bg-white dark:bg-gray-900 pb-4">
+            <table class="w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
+                    <tr>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">NO.</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PCODE</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">CATEGORY</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">STOCK</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-black dark:divide-black">
+                    <?php $no = 1; foreach ($products as $product): ?>
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                            onclick="openQtyPopup(<?php echo (int)$product['product_id']; ?>, <?php echo h(json_encode($product['product_name'])); ?>, <?php echo (float)$product['price']; ?>, <?php echo (int)$product['current_stock']; ?>)">
+                            <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
+                            <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
+                            <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
+                            <td class="py-4 px-6 text-sm"><?php echo h($product['brand'] ?: '-'); ?></td>
+                            <td class="py-4 px-6 text-sm"><?php echo h($product['category_name']); ?></td>
+                            <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
+                            <td class="py-4 px-6 text-sm"><?php echo (int)$product['current_stock']; ?></td>
                         </tr>
-                    </thead>
-                    <tbody class="divide-y divide-black dark:divide-black">
-                        <?php $no = 1; foreach ($products as $product): ?>
-                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                                <td class="py-4 px-6">
-                                    <input type="checkbox" name="selected_products[]" value="<?php echo h((string)$product['product_id']); ?>" class="w-5 h-5 border-black dark:border-black rounded-sm focus:ring-black">
-                                </td>
-                                <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
-                                <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                                <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
-                                <td class="py-4 px-6 text-sm"><?php echo h($product['brand'] ?: '-'); ?></td>
-                                <td class="py-4 px-6 text-sm"><?php echo h($product['category_name']); ?></td>
-                                <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($products)): ?>
-                            <tr><td colspan="7" class="py-8 text-center text-gray-500">No products found.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-                
-                <!-- Bottom Buttons Fixed -->
-                <div class="absolute bottom-0 left-0 right-0 border-t border-black dark:border-black p-6 flex gap-6 bg-white dark:bg-gray-900 z-20">
-                    <button type="submit" name="add_multiple_to_cart" class="border border-black dark:border-black rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
-                    <button type="reset" class="border border-black dark:border-black rounded-md px-8 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Remove</button>
-                </div>
-            </form>
+                    <?php endforeach; ?>
+                    <?php if (empty($products)): ?>
+                        <tr><td colspan="7" class="py-8 text-center text-gray-500">No products found.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
     
@@ -443,6 +385,38 @@ include '../includes/header.php';
                 </tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<!-- Quantity Popup Modal -->
+<div id="qtyPopupModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div class="w-[400px] bg-white dark:bg-gray-800 border border-black dark:border-black shadow-2xl flex flex-col">
+        <div class="border-b border-black dark:border-black py-4 px-6">
+            <h3 class="text-sm font-bold uppercase tracking-wider text-black dark:text-white" id="qtyPopupTitle">ADD TO CART</h3>
+        </div>
+        <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="qtyPopupForm">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="product_id" id="qtyPopupProductId">
+            <div class="p-6 space-y-4">
+                <div class="text-sm text-black dark:text-white">
+                    <span class="font-bold" id="qtyPopupName"></span>
+                    <span class="ml-2 text-gray-500" id="qtyPopupPrice"></span>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Available Stock: <span id="qtyPopupStock"></span></div>
+                <div>
+                    <label class="block text-sm font-medium mb-2 text-black dark:text-white">Quantity</label>
+                    <div class="flex items-center gap-4">
+                        <button type="button" onclick="adjustQtyPopup(-1)" class="w-10 h-10 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white text-xl font-bold">-</button>
+                        <input type="number" name="qty" id="qtyPopupInput" min="1" value="1" class="w-20 text-center border border-black dark:border-black px-3 py-2 bg-transparent dark:bg-gray-700 dark:text-white focus:outline-none text-lg font-medium" required>
+                        <button type="button" onclick="adjustQtyPopup(1)" class="w-10 h-10 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white text-xl font-bold">+</button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-black dark:border-black flex justify-end gap-4">
+                <button type="button" onclick="closeQtyPopup()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white">Cancel</button>
+                <button type="submit" name="add_to_cart" class="border-2 border-black dark:border-black rounded-md px-6 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -552,11 +526,11 @@ include '../includes/header.php';
         
         <div class="flex justify-center gap-8 mb-8 w-full max-w-lg">
             <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="flex-1 border-2 border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">CASH</button>
-            <button type="button" id="btnGCASH" onclick="setPaymentMethod('GCASH')" class="flex-1 border border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">GCASH</button>
+            <button type="button" id="btnEWALLET" onclick="setPaymentMethod('E-WALLET')" class="flex-1 border border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">E-WALLET</button>
         </div>
         
         <div id="refNumberContainer" class="hidden flex-col items-center mb-12 w-full max-w-lg">
-            <label class="block text-sm mb-4">If paying via GCASH, enter Reference Number</label>
+            <label class="block text-sm mb-4">If paying via E-Wallet, enter Reference Number</label>
             <input type="text" id="referenceNumber" class="w-full border border-black dark:border-black px-4 py-3 bg-transparent focus:outline-none">
         </div>
         
@@ -599,11 +573,57 @@ include '../includes/header.php';
 </div>
 <script>
     const totalDue = <?php echo json_encode($totalDue); ?>;
+    var qtyPopupMaxStock = 1;
     
     function calculateChange() {
         const received = parseFloat(document.getElementById('amountReceived').value) || 0;
         const change = received - totalDue;
         document.getElementById('changeAmount').textContent = change > 0 ? change.toFixed(2) : "0.00";
+    }
+
+    function openQtyPopup(productId, productName, price, stock) {
+        document.getElementById('qtyPopupProductId').value = productId;
+        document.getElementById('qtyPopupName').textContent = productName;
+        document.getElementById('qtyPopupPrice').textContent = '₱' + price.toFixed(2);
+        document.getElementById('qtyPopupStock').textContent = stock;
+        document.getElementById('qtyPopupInput').value = 1;
+        document.getElementById('qtyPopupInput').max = stock;
+        qtyPopupMaxStock = stock;
+        document.getElementById('qtyPopupModal').classList.remove('hidden');
+        document.getElementById('qtyPopupModal').classList.add('flex');
+        document.getElementById('qtyPopupInput').focus();
+    }
+
+    function closeQtyPopup() {
+        document.getElementById('qtyPopupModal').classList.add('hidden');
+        document.getElementById('qtyPopupModal').classList.remove('flex');
+    }
+
+    function adjustQtyPopup(delta) {
+        var input = document.getElementById('qtyPopupInput');
+        var newVal = Math.max(1, Math.min(qtyPopupMaxStock, (parseInt(input.value) || 1) + delta));
+        input.value = newVal;
+    }
+
+    function printReceipt() {
+        var receiptEl = document.querySelector('.fixed.inset-0.z-\\[110\\] .w-\\[500px\\]');
+        if (!receiptEl) return;
+        var printWin = window.open('', '_blank', 'width=500,height=700');
+        printWin.document.write('<html><head><title>Receipt</title><style>');
+        printWin.document.write('body{font-family:monospace,sans-serif;margin:0;padding:20px;font-size:12px;color:#000}');
+        printWin.document.write('table{width:100%;border-collapse:collapse}th,td{padding:6px 4px;text-align:left}');
+        printWin.document.write('th{border-bottom:1px solid #000;font-weight:bold}td{border-bottom:1px dashed #ccc}');
+        printWin.document.write('.text-center{text-align:center}.text-right{text-align:right}');
+        printWin.document.write('.font-bold,.font-medium{font-weight:bold}.text-sm{font-size:12px}.text-xl{font-size:16px}');
+        printWin.document.write('.mb-1,.mb-2{margin-bottom:4px}.mt-3{margin-top:8px}.pb-3{padding-bottom:6px}');
+        printWin.document.write('.uppercase{text-transform:uppercase}.tracking-widest{letter-spacing:4px}');
+        printWin.document.write('@media print{button{display:none !important}}');
+        printWin.document.write('</style></head><body>');
+        printWin.document.write(receiptEl.innerHTML);
+        printWin.document.write('</body></html>');
+        printWin.document.close();
+        printWin.focus();
+        printWin.print();
     }
     
     function setPaymentMethod(method) {
@@ -611,12 +631,12 @@ include '../includes/header.php';
         if (method === 'CASH') {
             document.getElementById('btnCASH').classList.add('border-2');
             document.getElementById('btnCASH').classList.remove('border');
-            document.getElementById('btnGCASH').classList.remove('border-2');
-            document.getElementById('btnGCASH').classList.add('border');
+            document.getElementById('btnEWALLET').classList.remove('border-2');
+            document.getElementById('btnEWALLET').classList.add('border');
             document.getElementById('refNumberContainer').classList.add('hidden');
         } else {
-            document.getElementById('btnGCASH').classList.add('border-2');
-            document.getElementById('btnGCASH').classList.remove('border');
+            document.getElementById('btnEWALLET').classList.add('border-2');
+            document.getElementById('btnEWALLET').classList.remove('border');
             document.getElementById('btnCASH').classList.remove('border-2');
             document.getElementById('btnCASH').classList.add('border');
             document.getElementById('refNumberContainer').classList.remove('hidden');
@@ -711,7 +731,10 @@ include '../includes/header.php';
         <div class="p-8 border-t border-black dark:border-gray-600 bg-white dark:bg-gray-800">
             <div class="text-sm font-bold mb-3">TOTAL: <?php echo number_format((float)$receiptSale['total_amount'], 2); ?></div>
             <div class="text-sm font-bold mb-8 uppercase">PAID BY: <?php echo h($receiptSale['payment_method']); ?></div>
-            <div class="text-center text-sm font-medium">Thank You :)</div>
+            <div class="text-center text-sm font-medium mb-4">Thank You :)</div>
+            <div class="flex justify-center gap-4">
+                <button type="button" onclick="printReceipt()" class="border-2 border-black dark:border-black rounded-md px-8 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white uppercase tracking-wide">Print Receipt</button>
+            </div>
         </div>
     </div>
 </div>
@@ -787,9 +810,11 @@ include '../includes/header.php';
                 const isCartModalOpen = !document.getElementById('cartModal')?.classList.contains('hidden');
                 const isSpecsModalOpen = !document.getElementById('specsModal')?.classList.contains('hidden');
                 const isCheckoutViewOpen = !document.getElementById('pos-checkout-view')?.classList.contains('hidden');
+                const isQtyPopupOpen = !document.getElementById('qtyPopupModal')?.classList.contains('hidden');
                 
                 try {
                     const response = await fetch(fetchUrl, fetchOptions);
+                    if (response.ok) {
                         const html = await response.text();
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(html, 'text/html');
