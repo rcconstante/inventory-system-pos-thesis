@@ -90,6 +90,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
+            // Redirect back to checkout view if that's where the update came from
+            if (isset($_GET['checkout'])) {
+                redirect_to('pages/pos.php?checkout=1');
+            }
             $redirectUrl = 'pos.php?cart=1' . (isset($_GET['q']) ? '&q=' . urlencode($_GET['q']) : '');
             redirect_to('pages/' . basename($redirectUrl));
             
@@ -103,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $paymentMethod = strtoupper((string) ($_POST['payment_method'] ?? preferred_payment_method()));
-            if (!in_array($paymentMethod, ['CASH', 'E-WALLET', 'CARD'], true)) {
+            if (!in_array($paymentMethod, ['CASH', 'GCASH', 'E-WALLET', 'CARD'], true)) {
                 throw new RuntimeException('Please select a valid payment method.');
             }
 
@@ -288,6 +292,10 @@ $totalDue = 0.0;
 foreach ($cart as $cartItem) {
     $totalDue += (float)($cartItem['price'] ?? 0) * (int)($cartItem['qty'] ?? 0);
 }
+
+// Next transaction number for checkout header
+$nextTransactionStmt = $pdo->query("SELECT COALESCE(MAX(sale_id), 0) + 1 FROM Sale");
+$nextTransactionNo = (int) $nextTransactionStmt->fetchColumn();
 
 $page_title = 'POINT OF SALE';
 include '../includes/header.php';
@@ -497,83 +505,97 @@ include '../includes/header.php';
 </div>
 
 <!-- Checkout View (In-page) -->
-<div id="pos-checkout-view" class="<?php echo isset($_GET['checkout']) ? 'flex' : 'hidden'; ?> h-[calc(100vh-140px)] -m-8 font-sans bg-white dark:bg-gray-900 text-black dark:text-white border-t border-black dark:border-black">
-    <!-- Left Column: Transaction Details -->
-    <div class="w-[400px] flex-shrink-0 flex flex-col border-r border-black dark:border-black">
-        <div class="flex-1 overflow-auto pt-8">
-            <h2 class="text-xl font-bold text-center mb-2 tracking-wide">CHECKOUT PREVIEW</h2>
-            <p class="text-sm text-center mb-8">Date: <?php echo date('F d, Y'); ?></p>
-            
-            <div class="flex justify-between font-bold px-8 mb-4">
-                <span>Products Name</span>
-                <span>Amount</span>
-            </div>
-            <div class="px-8 space-y-4 text-sm font-medium mb-8">
-                <?php foreach ($cart as $item): ?>
-                    <div class="flex justify-between">
-                        <span><?php echo h($item['name']); ?></span>
-                        <span>&#8369;<?php echo number_format((float)$item['price'], 2); ?></span>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        <div class="border-t border-black dark:border-black p-8 flex flex-col gap-3 text-lg font-medium">
-            <div>Total: <?php echo number_format($totalDue, 2); ?></div>
-            <div class="flex items-center gap-2">
-                <span>Amount Received:</span>
-                <input type="number" id="amountReceived" class="border border-black dark:border-black px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
-            </div>
-            <div>Change: <span id="changeAmount">0.00</span></div>
-        </div>
+<div id="pos-checkout-view" class="<?php echo isset($_GET['checkout']) ? 'flex' : 'hidden'; ?> flex-col h-[calc(100vh-140px)] -m-8 font-sans bg-white dark:bg-gray-900 text-black dark:text-white border-t border-black dark:border-black overflow-auto">
+    <!-- Transaction Header -->
+    <div class="text-center pt-6 pb-4">
+        <h2 class="text-2xl font-bold tracking-wide">TRANSACTION NO. <?php echo $nextTransactionNo; ?></h2>
+        <p class="text-sm mt-1">Date: <?php echo date('F d, Y'); ?></p>
     </div>
-    
-    <!-- Right Column: Payment & Recommended -->
-    <div class="flex-1 flex flex-col p-12 items-center relative">
-        <h3 class="text-center text-sm font-bold uppercase mb-8 tracking-wide">SELECT PAYMENT METHOD</h3>
-        
-        <div class="flex justify-center gap-8 mb-8 w-full max-w-lg">
-            <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="flex-1 border-2 border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">CASH</button>
-            <button type="button" id="btnEWALLET" onclick="setPaymentMethod('E-WALLET')" class="flex-1 border border-black dark:border-black py-3 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide">E-WALLET</button>
-        </div>
-        
-        <div id="refNumberContainer" class="hidden flex-col items-center mb-12 w-full max-w-lg">
-            <label class="block text-sm mb-4">If paying via E-Wallet, enter Reference Number</label>
-            <input type="text" id="referenceNumber" class="w-full border border-black dark:border-black px-4 py-3 bg-transparent focus:outline-none">
-        </div>
-        
-        <div class="flex flex-col items-center mb-auto w-full max-w-lg">
-            <h4 class="font-medium mb-6">Recommended Products:</h4>
-            <div class="w-full space-y-4">
-                <?php if (empty($flatRecommendations)): ?>
-                    <div class="border border-black dark:border-black p-6 text-center text-sm font-medium bg-white dark:bg-gray-800 text-gray-500">
-                        Currently no recommended products
-                    </div>
-                <?php else: ?>
-                    <?php foreach (array_slice($flatRecommendations, 0, 3) as $rec): ?>
-                        <div class="flex items-center justify-between border border-black dark:border-black pl-6 pr-0 py-0 font-medium bg-white dark:bg-gray-800">
-                            <span><?php echo h($rec['alternative_name']); ?></span>
-                            <div class="flex items-center gap-6">
-                                <span>&#8369; <?php echo number_format((float)($rec['price'] ?? 0), 2); ?></span>
-                                <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1' . (isset($_GET['q']) ? '&q=' . urlencode($_GET['q']) : ''))); ?>" class="m-0">
-                                    <?php echo csrf_field(); ?>
-                                    <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
-                                    <input type="hidden" name="qty" value="1">
-                                    <button type="submit" name="add_to_cart" class="border-l border-black dark:border-black px-6 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors h-full text-sm font-bold bg-white dark:bg-gray-800 text-black dark:text-white">Add</button>
-                                </form>
-                            </div>
+
+    <!-- Items Table -->
+    <div class="flex-1 px-8 overflow-auto">
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="border-b-2 border-black dark:border-white">
+                    <th class="text-left py-3 px-4 font-bold">PCODE</th>
+                    <th class="text-left py-3 px-4 font-bold">Product Name</th>
+                    <th class="text-left py-3 px-4 font-bold">Unit Price</th>
+                    <th class="text-center py-3 px-4 font-bold">Quantity</th>
+                    <th class="text-right py-3 px-4 font-bold">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($cart as $pid => $item):
+                    $itemTotal = (float)$item['price'] * (int)$item['qty'];
+                ?>
+                <tr class="border-b border-gray-300 dark:border-gray-600">
+                    <td class="py-3 px-4">P<?php echo str_pad((string)$pid, 4, '0', STR_PAD_LEFT); ?></td>
+                    <td class="py-3 px-4"><?php echo h($item['name']); ?></td>
+                    <td class="py-3 px-4">&#8369;<?php echo number_format((float)$item['price'], 2); ?></td>
+                    <td class="py-3 px-4">
+                        <div class="flex items-center justify-center gap-2">
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1')); ?>" class="inline m-0">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="product_id" value="<?php echo (int)$pid; ?>">
+                                <input type="hidden" name="action" value="decrease">
+                                <button type="submit" name="update_cart_qty" value="1" class="w-7 h-7 border border-black dark:border-white flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 text-xs font-bold">&#8722;</button>
+                            </form>
+                            <span class="w-8 text-center font-medium"><?php echo (int)$item['qty']; ?></span>
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1')); ?>" class="inline m-0">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="product_id" value="<?php echo (int)$pid; ?>">
+                                <input type="hidden" name="action" value="increase">
+                                <button type="submit" name="update_cart_qty" value="1" class="w-7 h-7 border border-black dark:border-white flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 text-xs font-bold">&#43;</button>
+                            </form>
                         </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
+                    </td>
+                    <td class="py-3 px-4 text-right">&#8369;<?php echo number_format($itemTotal, 2); ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Bottom Section: Payment Method + Totals + Buttons -->
+    <div class="border-t border-black dark:border-black px-8 py-6">
+        <div class="flex items-start">
+            <!-- Left: Payment Method (centered in its column) -->
+            <div class="flex-1 flex flex-col items-center text-center">
+                <h3 class="text-sm font-bold uppercase mb-4 tracking-wide">SELECT PAYMENT METHOD</h3>
+                <div class="flex gap-4 mb-4">
+                    <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="border-2 border-black dark:border-white px-8 py-2 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide text-sm">CASH</button>
+                    <button type="button" id="btnEWALLET" onclick="setPaymentMethod('GCASH')" class="border border-black dark:border-white px-8 py-2 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide text-sm">GCASH</button>
+                </div>
+                <div id="refNumberContainer" class="hidden flex-col items-center mb-2 text-left">
+                    <label class="block text-sm mb-2">If paying via GCASH, enter Reference Number</label>
+                    <input type="text" id="referenceNumber" class="w-64 border border-black dark:border-white px-3 py-2 bg-transparent focus:outline-none text-sm" placeholder="Enter reference number">
+                    <p id="refNumberError" class="text-red-500 text-xs mt-1 hidden">Reference number is required for GCASH payments.</p>
+                </div>
+            </div>
+
+            <!-- Vertical Divider -->
+            <div class="self-stretch w-px bg-black dark:bg-white mx-6"></div>
+
+            <!-- Right: Totals (left-aligned) -->
+            <div class="flex-1 text-left text-base font-medium space-y-2">
+                <div>Total Amount: <?php echo number_format($totalDue, 2); ?></div>
+                <div class="flex items-center gap-2">
+                    <span>Amount Received:</span>
+                    <input type="number" id="amountReceived" class="border border-black dark:border-white px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
+                </div>
+                <div>Change: <span id="changeAmount">0.00</span></div>
             </div>
         </div>
-        
-        <div class="absolute bottom-12 right-12 flex justify-end gap-4">
-            <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-black px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CANCEL</button>
-            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="checkoutForm">
+
+        <!-- Bottom Buttons -->
+        <div class="flex justify-end gap-4 mt-6">
+            <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-white px-8 py-2 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">BACK</button>
+            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="checkoutForm" onsubmit="return validateCheckout()">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="checkout" value="1">
                 <input type="hidden" name="payment_method" id="selectedPaymentMethod" value="CASH">
-                <button type="submit" class="border border-black dark:border-black px-8 py-3 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CONFIRM PAYMENT</button>
+                <input type="hidden" name="reference_number" id="hiddenRefNumber" value="">
+                <button type="submit" class="border border-black dark:border-white px-8 py-2 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">CONFIRM PAYMENT</button>
             </form>
         </div>
     </div>
@@ -648,19 +670,37 @@ include '../includes/header.php';
     
     function setPaymentMethod(method) {
         document.getElementById('selectedPaymentMethod').value = method;
+        document.getElementById('refNumberError').classList.add('hidden');
         if (method === 'CASH') {
             document.getElementById('btnCASH').classList.add('border-2');
             document.getElementById('btnCASH').classList.remove('border');
             document.getElementById('btnEWALLET').classList.remove('border-2');
             document.getElementById('btnEWALLET').classList.add('border');
             document.getElementById('refNumberContainer').classList.add('hidden');
+            document.getElementById('refNumberContainer').classList.remove('flex');
         } else {
             document.getElementById('btnEWALLET').classList.add('border-2');
             document.getElementById('btnEWALLET').classList.remove('border');
             document.getElementById('btnCASH').classList.remove('border-2');
             document.getElementById('btnCASH').classList.add('border');
             document.getElementById('refNumberContainer').classList.remove('hidden');
+            document.getElementById('refNumberContainer').classList.add('flex');
+            document.getElementById('referenceNumber').focus();
         }
+    }
+
+    function validateCheckout() {
+        var method = document.getElementById('selectedPaymentMethod').value;
+        if (method === 'GCASH') {
+            var refNum = document.getElementById('referenceNumber').value.trim();
+            if (!refNum) {
+                document.getElementById('refNumberError').classList.remove('hidden');
+                document.getElementById('referenceNumber').focus();
+                return false;
+            }
+            document.getElementById('hiddenRefNumber').value = refNum;
+        }
+        return true;
     }
 
     function openCartModal() {
