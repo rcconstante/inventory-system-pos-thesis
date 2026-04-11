@@ -364,6 +364,64 @@ $recommendations = recommendations_enabled()
 $allSalesCounts = array_map(static fn (array $p): int => (int) ($p['sales_count'] ?? 0), $products);
 $avgSalesCount = count($allSalesCounts) > 0 ? array_sum($allSalesCounts) / count($allSalesCounts) : 0;
 
+// Pre-compute product data JSON in PHP context (NOT inside the script tag) so any
+// PDOException from fetch_batches_for_product never corrupts the <script> block.
+try {
+    $productDataJson = json_encode(array_map(function($p) use ($pdo, $recommendations, $canManage, $avgSalesCount) {
+        try {
+            $batches = fetch_batches_for_product($pdo, (int)$p['product_id']);
+        } catch (Exception $e) {
+            $batches = [];
+        }
+        $recs = $recommendations[(int)$p['product_id']] ?? [];
+        $salesCount = (int)($p['sales_count'] ?? 0);
+        $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
+        return [
+            'id' => (int)$p['product_id'],
+            'name' => $p['product_name'],
+            'brand' => $p['brand'] ?? '',
+            'category' => $p['category_name'] ?? 'N/A',
+            'category_id' => (int)($p['category_id'] ?? 0),
+            'description' => $p['description'] ?? '',
+            'price' => (float)$p['price'],
+            'retail_price' => $p['retail_price'] !== null ? (float)$p['retail_price'] : null,
+            'acquisition_cost' => $p['acquisition_cost'] !== null ? (float)$p['acquisition_cost'] : null,
+            'manufacturing_date' => $p['manufacturing_date'] ?? '',
+            'expiration_date' => $p['expiration_date'] ?? '',
+            'product_type' => $p['product_type'] ?? '',
+            'specification' => $p['specification'] ?? '',
+            'compatibility' => $p['compatibility'] ?? '',
+            'current_stock' => (int)$p['current_stock'],
+            'min_stock_level' => (int)$p['min_stock_level'],
+            'expiry_date' => $p['expiry_date'] ?? '',
+            'sales_count' => $salesCount,
+            'status_label' => $statusLabel,
+            'batches' => array_map(function($b) {
+                return [
+                    'batch_id' => (int)$b['batch_id'],
+                    'batch_number' => $b['batch_number'],
+                    'qty_remaining' => (int)$b['quantity_remaining'],
+                    'qty_received' => (int)$b['quantity_received'],
+                    'acquisition_cost' => $b['acquisition_cost'] !== null ? (float)$b['acquisition_cost'] : null,
+                    'manufacturing_date' => $b['manufacturing_date'] ?? '',
+                    'expiration_date' => $b['expiration_date'] ?? '',
+                    'date_received' => $b['date_received'] ?? '',
+                    'is_depleted' => (int)$b['is_depleted'],
+                    'status' => $b['status'] ?? 'ACTIVE',
+                ];
+            }, $batches),
+            'recommendations' => array_map(function($r) {
+                return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
+            }, array_slice($recs, 0, 5)),
+            'can_manage' => $canManage,
+        ];
+    }, $products), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    if ($productDataJson === false) { $productDataJson = '[]'; }
+} catch (Exception $e) {
+    error_log('products.php productDataJson error: ' . $e->getMessage());
+    $productDataJson = '[]';
+}
+
 $page_title = 'INVENTORY';
 include '../includes/header.php';
 ?>
@@ -494,8 +552,8 @@ include '../includes/header.php';
     if ($selectedCategoryId > 0) { $paginationParams['category_id'] = $selectedCategoryId; }
     if ($searchTerm !== '') { $paginationParams['search'] = $searchTerm; }
     ?>
-    <?php if ($currentPage > 1): ?>
-        <?php $paginationParams['page'] = $currentPage - 1; ?>
+    <?php if ((int)$currentPage > 1): ?>
+        <?php $paginationParams['page'] = (int)$currentPage - 1; ?>
         <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Previous</a>
     <?php else: ?>
         <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Previous</button>
@@ -503,8 +561,8 @@ include '../includes/header.php';
 
     <span class="flex items-center text-sm text-gray-600 dark:text-gray-400">Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></span>
 
-    <?php if ($currentPage < $totalPages): ?>
-        <?php $paginationParams['page'] = $currentPage + 1; ?>
+    <?php if ((int)$currentPage < (int)$totalPages): ?>
+        <?php $paginationParams['page'] = (int)$currentPage + 1; ?>
         <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Next</a>
     <?php else: ?>
         <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Next</button>
@@ -570,29 +628,29 @@ include '../includes/header.php';
 
 <!-- Product Detail Modal -->
 <div id="productDetailModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col" style="max-height:90vh;">
-        <div class="flex items-center justify-between border-b dark:border-gray-700 p-5">
+    <div class="w-full max-w-xl bg-white dark:bg-gray-800 border border-black dark:border-black shadow-lg flex flex-col" style="max-height:90vh;">
+        <div class="flex items-center justify-between border-b border-black dark:border-black p-5">
             <h3 class="text-lg font-bold dark:text-white">PRODUCT DETAILS</h3>
             <button type="button" onclick="toggleProductModal('productDetailModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
         </div>
         <div id="detailProductContent" class="p-5 overflow-y-auto dark:text-gray-100"></div>
-        <div id="detailProductActions" class="flex justify-end gap-2 border-t dark:border-gray-700 p-4"></div>
+        <div id="detailProductActions" class="flex justify-end gap-2 border-t border-black dark:border-black p-4"></div>
     </div>
 </div>
 
 <!-- Batch Management Modal -->
 <div id="batchManagementModal" class="hidden fixed inset-0 z-[60] items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-2xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col dark:text-gray-100" style="max-height:90vh;">
-        <div class="flex items-center justify-between border-b dark:border-gray-700 p-5">
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 border border-black dark:border-black shadow-lg flex flex-col dark:text-gray-100" style="max-height:90vh;">
+        <div class="flex items-center justify-between border-b border-black dark:border-black p-5">
             <h3 class="text-lg font-bold">BATCH MANAGEMENT</h3>
             <button type="button" onclick="toggleProductModal('batchManagementModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
         </div>
         <div id="batchModalContent" class="p-5 overflow-y-auto"></div>
-        <div class="flex justify-end gap-2 border-t dark:border-gray-700 p-4">
+        <div class="flex justify-end gap-2 border-t border-black dark:border-black p-4">
             <button type="button" onclick="toggleProductModal('batchManagementModal', false)" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700">Close</button>
         </div>
     </div>
@@ -600,8 +658,12 @@ include '../includes/header.php';
 
 <!-- Add Batch Modal -->
 <div id="addBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 shadow-lg p-6 dark:text-gray-100">
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 border border-black dark:border-black shadow-lg p-6 dark:text-gray-100">
         <h3 class="text-lg font-bold mb-4">ADD NEW BATCH</h3>
+        <div class="text-sm mb-4 space-y-1">
+            <p><span class="font-bold">Product ID:</span> <span id="addBatch_productId"></span></p>
+            <p><span class="font-bold">Product Name:</span> <span id="addBatch_productName"></span></p>
+        </div>
         <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="product_id" id="addBatch_product_id">
@@ -637,9 +699,12 @@ include '../includes/header.php';
 
 <!-- Edit Batch Modal -->
 <div id="editBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 shadow-lg p-6 dark:text-gray-100">
-        <h3 class="text-lg font-bold mb-2">EDIT BATCH</h3>
-        <p class="text-sm mb-4"><span class="font-bold">Product:</span> <span id="editBatch_productName"></span></p>
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 border border-black dark:border-black shadow-lg p-6 dark:text-gray-100">
+        <h3 class="text-lg font-bold mb-4">EDIT BATCH</h3>
+        <div class="text-sm mb-4 space-y-1">
+            <p><span class="font-bold">Product ID:</span> <span id="editBatch_productId"></span></p>
+            <p><span class="font-bold">Product Name:</span> <span id="editBatch_productName"></span></p>
+        </div>
         <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="batch_id" id="editBatch_id">
@@ -683,7 +748,7 @@ include '../includes/header.php';
 
 <!-- Delete Batch Confirm Modal -->
 <div id="deleteBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+    <div class="w-full max-w-sm bg-white dark:bg-gray-800 border border-black dark:border-black p-6 shadow-xl dark:text-gray-100">
         <h2 class="text-lg font-bold mb-4">Delete Batch</h2>
         <p class="mb-6 text-sm">Are you sure you want to delete batch <strong id="deleteBatchName"></strong>?</p>
         <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
@@ -746,57 +811,8 @@ include '../includes/header.php';
         toggleProductModal('deleteProductModal', true);
     }
 
-    // ─── Product Data (may fail if DB has non-UTF8 chars — wrapped in try/catch) ───
-    var productData = [];
-    try {
-        productData = <?php echo json_encode(array_map(function($p) use ($pdo, $recommendations, $canManage, $avgSalesCount) {
-            $batches = fetch_batches_for_product($pdo, (int)$p['product_id']);
-            $recs = $recommendations[(int)$p['product_id']] ?? [];
-            $salesCount = (int)($p['sales_count'] ?? 0);
-            $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
-            return [
-                'id' => (int)$p['product_id'],
-                'name' => $p['product_name'],
-                'brand' => $p['brand'] ?? '',
-                'category' => $p['category_name'] ?? 'N/A',
-                'category_id' => (int)($p['category_id'] ?? 0),
-                'description' => $p['description'] ?? '',
-                'price' => (float)$p['price'],
-                'retail_price' => $p['retail_price'] !== null ? (float)$p['retail_price'] : null,
-                'acquisition_cost' => $p['acquisition_cost'] !== null ? (float)$p['acquisition_cost'] : null,
-                'manufacturing_date' => $p['manufacturing_date'] ?? '',
-                'expiration_date' => $p['expiration_date'] ?? '',
-                'product_type' => $p['product_type'] ?? '',
-                'specification' => $p['specification'] ?? '',
-                'compatibility' => $p['compatibility'] ?? '',
-                'current_stock' => (int)$p['current_stock'],
-                'min_stock_level' => (int)$p['min_stock_level'],
-                'expiry_date' => $p['expiry_date'] ?? '',
-                'sales_count' => $salesCount,
-                'status_label' => $statusLabel,
-                'batches' => array_map(function($b) {
-                    return [
-                        'batch_id' => (int)$b['batch_id'],
-                        'batch_number' => $b['batch_number'],
-                        'qty_remaining' => (int)$b['quantity_remaining'],
-                        'qty_received' => (int)$b['quantity_received'],
-                        'acquisition_cost' => $b['acquisition_cost'] !== null ? (float)$b['acquisition_cost'] : null,
-                        'manufacturing_date' => $b['manufacturing_date'] ?? '',
-                        'expiration_date' => $b['expiration_date'] ?? '',
-                        'date_received' => $b['date_received'] ?? '',
-                        'is_depleted' => (int)$b['is_depleted'],
-                        'status' => $b['status'] ?? 'ACTIVE',
-                    ];
-                }, $batches),
-                'recommendations' => array_map(function($r) {
-                    return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
-                }, array_slice($recs, 0, 5)),
-                'can_manage' => $canManage,
-            ];
-        }, $products), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '[]'; ?>;
-    } catch(e) {
-        console.error('Failed to parse product data:', e);
-    }
+    // ─── Product Data (pre-computed in PHP before HTML output to avoid script corruption) ───
+    var productData = <?php echo $productDataJson; ?>;
 
     // ─── Product Detail Modal ───
     function openProductDetailModal(productId) {
@@ -880,7 +896,17 @@ include '../includes/header.php';
                 <?php if ($canManage): ?>
                 html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">';
                 html += '<div class="flex items-center justify-center gap-1">';
-                html += '<button type="button" title="Edit" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openEditBatchModal(' + b.batch_id + ', \'' + escapeAttr(product.name) + '\', \'' + escapeAttr(b.batch_number) + '\', ' + (b.acquisition_cost !== null ? b.acquisition_cost : 'null') + ', \'' + escapeAttr(b.manufacturing_date) + '\', ' + b.qty_remaining + ', \'' + escapeAttr(b.expiration_date) + '\', \'' + escapeAttr(b.status) + '\')">';
+                html += '<button type="button" title="Edit" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openEditBatchModal(this)"'
+                    + ' data-batch-id="' + b.batch_id + '"'
+                    + ' data-product-id="' + product.id + '"'
+                    + ' data-product-name="' + escapeAttr(product.name) + '"'
+                    + ' data-batch-number="' + escapeAttr(b.batch_number) + '"'
+                    + ' data-cost="' + (b.acquisition_cost !== null ? b.acquisition_cost : '') + '"'
+                    + ' data-mfg-date="' + (b.manufacturing_date || '') + '"'
+                    + ' data-qty="' + b.qty_remaining + '"'
+                    + ' data-exp-date="' + (b.expiration_date || '') + '"'
+                    + ' data-status="' + (b.status || 'ACTIVE') + '"'
+                    + '>'; 
                 html += '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>';
                 html += '</button>';
                 html += '<button type="button" title="Delete" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openDeleteBatchModal(' + b.batch_id + ', \'' + escapeAttr(b.batch_number) + '\')">';
@@ -904,22 +930,24 @@ include '../includes/header.php';
 
     function openAddBatchModal(productId) {
         document.getElementById('addBatch_product_id').value = productId;
-        // Suggest next batch number
         var product = productData.find(function(p) { return p.id === productId; });
+        document.getElementById('addBatch_productId').textContent = 'P' + String(productId).padStart(3, '0');
+        document.getElementById('addBatch_productName').textContent = product ? product.name : '';
         var nextNum = product ? product.batches.length + 1 : 1;
         document.getElementById('addBatch_number').value = 'B' + String(nextNum).padStart(3, '0');
         toggleProductModal('addBatchModal', true);
     }
 
-    function openEditBatchModal(batchId, productName, batchNumber, cost, mfgDate, qty, expDate, status) {
-        document.getElementById('editBatch_id').value = batchId;
-        document.getElementById('editBatch_productName').textContent = productName;
-        document.getElementById('editBatch_number').value = batchNumber;
-        document.getElementById('editBatch_cost').value = cost !== null ? cost : '';
-        document.getElementById('editBatch_mfg').value = mfgDate || '';
-        document.getElementById('editBatch_qty').value = qty;
-        document.getElementById('editBatch_exp').value = expDate || '';
-        document.getElementById('editBatch_status').value = status || 'ACTIVE';
+    function openEditBatchModal(btn) {
+        document.getElementById('editBatch_id').value = btn.dataset.batchId;
+        document.getElementById('editBatch_productId').textContent = 'P' + String(btn.dataset.productId).padStart(3, '0');
+        document.getElementById('editBatch_productName').textContent = btn.dataset.productName;
+        document.getElementById('editBatch_number').value = btn.dataset.batchNumber;
+        document.getElementById('editBatch_cost').value = btn.dataset.cost || '';
+        document.getElementById('editBatch_mfg').value = btn.dataset.mfgDate || '';
+        document.getElementById('editBatch_qty').value = btn.dataset.qty;
+        document.getElementById('editBatch_exp').value = btn.dataset.expDate || '';
+        document.getElementById('editBatch_status').value = btn.dataset.status || 'ACTIVE';
         toggleProductModal('editBatchModal', true);
     }
 

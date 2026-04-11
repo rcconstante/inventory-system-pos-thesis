@@ -283,6 +283,12 @@ if (isset($_GET['receipt_id'])) {
     }
 }
 
+$cart = $_SESSION['cart'] ?? [];
+$totalDue = 0.0;
+foreach ($cart as $cartItem) {
+    $totalDue += (float)($cartItem['price'] ?? 0) * (int)($cartItem['qty'] ?? 0);
+}
+
 $page_title = 'POINT OF SALE';
 include '../includes/header.php';
 ?>
