@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS User (
     email VARCHAR(100),
     role_id INT,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    display_name VARCHAR(100) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (role_id) REFERENCES Role(role_id) ON DELETE SET NULL
 );
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS Sale (
     total_amount DECIMAL(10, 2) NOT NULL,
     payment_method VARCHAR(50),
     status VARCHAR(50),
+    cancel_reason VARCHAR(255) DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES User(user_id) ON DELETE SET NULL
 );
 
@@ -129,43 +131,24 @@ CREATE TABLE IF NOT EXISTS Sale_Item_Batch (
     FOREIGN KEY (batch_id) REFERENCES Stock_Batch(batch_id) ON DELETE CASCADE
 );
 
--- Migrate existing installs: add new columns if they don't exist yet
-ALTER TABLE User ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
-ALTER TABLE User ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-ALTER TABLE User ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) DEFAULT NULL;
-ALTER TABLE Category ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1;
-ALTER TABLE Sale ADD COLUMN IF NOT EXISTS cancel_reason VARCHAR(255) DEFAULT NULL;
+-- =============================================
+-- MIGRATION SECTION (for existing databases ONLY)
+-- Skip this section if importing fresh.
+-- If you get "Duplicate column" errors, that is OK — it means the column already exists.
+-- Run each ALTER statement one at a time in phpMyAdmin if needed.
+-- =============================================
 
--- New columns for product enhancements
-ALTER TABLE Products ADD COLUMN IF NOT EXISTS retail_price DECIMAL(10, 2) DEFAULT NULL;
-ALTER TABLE Products ADD COLUMN IF NOT EXISTS acquisition_cost DECIMAL(10, 2) DEFAULT NULL;
-ALTER TABLE Products ADD COLUMN IF NOT EXISTS manufacturing_date DATE DEFAULT NULL;
-ALTER TABLE Products ADD COLUMN IF NOT EXISTS expiration_date DATE DEFAULT NULL;
-
--- Migrate existing price to retail_price where not set
-UPDATE Products SET retail_price = price WHERE retail_price IS NULL;
-
--- Migrate GCASH to E-WALLET in existing sales
-UPDATE Sale SET payment_method = 'E-WALLET' WHERE payment_method = 'GCASH';
-
--- Add status column to Stock_Batch if not exists
-ALTER TABLE Stock_Batch ADD COLUMN IF NOT EXISTS status ENUM('ACTIVE','EXPIRED','DISPOSED') NOT NULL DEFAULT 'ACTIVE';
-
--- Create initial batches from existing inventory (one batch per product)
-INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted)
-SELECT
-    i.product_id,
-    CONCAT('INIT-', i.product_id),
-    p.acquisition_cost,
-    p.manufacturing_date,
-    i.expiry_date,
-    i.current_stock,
-    i.current_stock,
-    CASE WHEN i.current_stock <= 0 THEN 1 ELSE 0 END
-FROM Inventory i
-JOIN Products p ON p.product_id = i.product_id
-WHERE NOT EXISTS (SELECT 1 FROM Stock_Batch sb WHERE sb.product_id = i.product_id)
-AND i.current_stock > 0;
+-- ALTER TABLE User ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1;
+-- ALTER TABLE User ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+-- ALTER TABLE User ADD COLUMN display_name VARCHAR(100) DEFAULT NULL;
+-- ALTER TABLE Category ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1;
+-- ALTER TABLE Sale ADD COLUMN cancel_reason VARCHAR(255) DEFAULT NULL;
+-- ALTER TABLE Products ADD COLUMN retail_price DECIMAL(10, 2) DEFAULT NULL;
+-- ALTER TABLE Products ADD COLUMN acquisition_cost DECIMAL(10, 2) DEFAULT NULL;
+-- ALTER TABLE Products ADD COLUMN manufacturing_date DATE DEFAULT NULL;
+-- ALTER TABLE Products ADD COLUMN expiration_date DATE DEFAULT NULL;
+-- ALTER TABLE Stock_Batch ADD COLUMN status ENUM('ACTIVE','EXPIRED','DISPOSED') NOT NULL DEFAULT 'ACTIVE';
+-- UPDATE Products SET retail_price = price WHERE retail_price IS NULL;
 
 -- Insert Default Roles
 INSERT IGNORE INTO Role (role_id, role_type) VALUES 

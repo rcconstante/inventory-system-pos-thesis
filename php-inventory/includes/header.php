@@ -122,24 +122,6 @@ $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
                     <?php echo date('d/m/Y'); ?>
                 </div>
                 <div class="flex items-center gap-4">
-                    <?php if (in_array(current_role_id(), [APP_ROLE_ADMIN, APP_ROLE_CASHIER], true)): ?>
-                        <?php
-                            $cartCount = 0;
-                            if (isset($_SESSION['cart']) && is_array($_SESSION['cart'])) {
-                                foreach ($_SESSION['cart'] as $item) {
-                                    $cartCount += (int)($item['qty'] ?? 0);
-                                }
-                            }
-                        ?>
-                        <button type="button" onclick="window.location.href='<?php echo h(app_url('pages/pos.php?cart=1')); ?>'" class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 rounded transition-colors relative" title="Cart">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shopping-cart"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
-                            <?php if ($cartCount > 0): ?>
-                                <span class="absolute lg:-top-1 lg:-right-1 -top-1.5 -right-1.5 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] flex items-center justify-center">
-                                    <?php echo $cartCount; ?>
-                                </span>
-                            <?php endif; ?>
-                        </button>
-                    <?php endif; ?>
                     <button type="button" onclick="toggleNotificationsModal(true)" class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 rounded transition-colors relative" title="Notifications">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bell"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
                         <?php if (isset($notificationCount) && $notificationCount > 0): ?>
