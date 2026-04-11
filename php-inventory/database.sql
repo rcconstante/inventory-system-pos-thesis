@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS Stock_Batch (
     quantity_remaining INT NOT NULL DEFAULT 0,
     date_received TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_depleted TINYINT(1) NOT NULL DEFAULT 0,
+    status ENUM('ACTIVE','EXPIRED','DISPOSED') NOT NULL DEFAULT 'ACTIVE',
     FOREIGN KEY (product_id) REFERENCES Products(product_id) ON DELETE CASCADE,
     INDEX idx_fifo_lookup (product_id, is_depleted, date_received)
 );
@@ -146,6 +147,9 @@ UPDATE Products SET retail_price = price WHERE retail_price IS NULL;
 
 -- Migrate GCASH to E-WALLET in existing sales
 UPDATE Sale SET payment_method = 'E-WALLET' WHERE payment_method = 'GCASH';
+
+-- Add status column to Stock_Batch if not exists
+ALTER TABLE Stock_Batch ADD COLUMN IF NOT EXISTS status ENUM('ACTIVE','EXPIRED','DISPOSED') NOT NULL DEFAULT 'ACTIVE';
 
 -- Create initial batches from existing inventory (one batch per product)
 INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted)

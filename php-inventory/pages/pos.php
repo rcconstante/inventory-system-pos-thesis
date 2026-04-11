@@ -220,6 +220,7 @@ $productQuery = "
         COALESCE(p.brand, '') AS brand,
         COALESCE(p.product_type, '') AS product_type,
         COALESCE(p.compatibility, '') AS compatibility,
+        COALESCE(p.specification, '') AS specification,
         COALESCE(p.category_id, 0) AS category_id,
         COALESCE(c.category_name, 'Uncategorized') AS category_name,
         p.price,
@@ -247,16 +248,10 @@ foreach ($productParameters as $parameter => $value) {
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
 
-$recommendations = recommendations_enabled()
-    ? fetch_recommendations_for_products($pdo, array_map(static fn (array $product): int => (int) $product['product_id'], $products))
-    : [];
-
-$cart = array_filter($_SESSION['cart'], static fn (array $item): bool => (int) ($item['qty'] ?? 0) > 0);
-$_SESSION['cart'] = $cart;
-
-$totalDue = 0.0;
-foreach ($cart as $item) {
-    $totalDue += ((float) $item['price']) * ((int) $item['qty']);
+// Only fetch recommendations when a search term is provided
+$recommendations = [];
+if ($searchTerm !== '' && recommendations_enabled()) {
+    $recommendations = fetch_recommendations_for_products($pdo, array_map(static fn (array $product): int => (int) $product['product_id'], $products));
 }
 
 $flatRecommendations = [];
@@ -323,7 +318,7 @@ include '../includes/header.php';
                 <tbody class="divide-y divide-black dark:divide-black">
                     <?php $no = 1; foreach ($products as $product): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                            onclick="openQtyPopup(<?php echo (int)$product['product_id']; ?>, <?php echo h(json_encode($product['product_name'])); ?>, <?php echo (float)$product['price']; ?>, <?php echo (int)$product['current_stock']; ?>)">
+                            onclick="openQtyPopup(<?php echo (int)$product['product_id']; ?>, <?php echo h(json_encode($product['product_name'])); ?>, <?php echo (float)$product['price']; ?>, <?php echo (int)$product['current_stock']; ?>, <?php echo h(json_encode($product['specification'] ?? '')); ?>, <?php echo h(json_encode($product['compatibility'] ?? '')); ?>)">
                             <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
                             <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
@@ -341,10 +336,11 @@ include '../includes/header.php';
         </div>
     </div>
     
-    <!-- Right side: Recommendations -->
+    <!-- Right side: Recommendations (only shown when searching) -->
+    <?php if ($searchTerm !== ''): ?>
     <div class="w-[450px] flex flex-col bg-white dark:bg-gray-900 flex-shrink-0">
         <div class="p-6 border-b border-black dark:border-black">
-            <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm ?: 'SELECT PRODUCT'); ?></h2>
+            <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm); ?></h2>
         </div>
         <div class="py-3 px-6 border-b border-black dark:border-black">
             <span class="font-bold text-sm tracking-wide"><?php echo count($flatRecommendations); ?> Featured-Based</span>
@@ -386,6 +382,7 @@ include '../includes/header.php';
             </table>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- Quantity Popup Modal -->
@@ -403,6 +400,10 @@ include '../includes/header.php';
                     <span class="ml-2 text-gray-500" id="qtyPopupPrice"></span>
                 </div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">Available Stock: <span id="qtyPopupStock"></span></div>
+                <div id="qtyPopupSpecs" class="hidden text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200 dark:border-gray-600 pt-3 space-y-1">
+                    <div id="qtyPopupSpecLine"></div>
+                    <div id="qtyPopupCompatLine"></div>
+                </div>
                 <div>
                     <label class="block text-sm font-medium mb-2 text-black dark:text-white">Quantity</label>
                     <div class="flex items-center gap-4">
@@ -581,7 +582,7 @@ include '../includes/header.php';
         document.getElementById('changeAmount').textContent = change > 0 ? change.toFixed(2) : "0.00";
     }
 
-    function openQtyPopup(productId, productName, price, stock) {
+    function openQtyPopup(productId, productName, price, stock, specification, compatibility) {
         document.getElementById('qtyPopupProductId').value = productId;
         document.getElementById('qtyPopupName').textContent = productName;
         document.getElementById('qtyPopupPrice').textContent = '₱' + price.toFixed(2);
@@ -589,6 +590,19 @@ include '../includes/header.php';
         document.getElementById('qtyPopupInput').value = 1;
         document.getElementById('qtyPopupInput').max = stock;
         qtyPopupMaxStock = stock;
+
+        // Show specs/compatibility if available
+        var specsSection = document.getElementById('qtyPopupSpecs');
+        var specLine = document.getElementById('qtyPopupSpecLine');
+        var compatLine = document.getElementById('qtyPopupCompatLine');
+        if ((specification && specification.trim()) || (compatibility && compatibility.trim())) {
+            specsSection.classList.remove('hidden');
+            specLine.innerHTML = specification ? '<span class="font-bold">Specifications:</span> ' + specification : '';
+            compatLine.innerHTML = compatibility ? '<span class="font-bold">Compatibility:</span> ' + compatibility : '';
+        } else {
+            specsSection.classList.add('hidden');
+        }
+
         document.getElementById('qtyPopupModal').classList.remove('hidden');
         document.getElementById('qtyPopupModal').classList.add('flex');
         document.getElementById('qtyPopupInput').focus();
@@ -819,7 +833,17 @@ include '../includes/header.php';
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(html, 'text/html');
 
+                        // Preserve dark mode class from <html> before body replacement
+                        const wasDarkMode = document.documentElement.classList.contains('dark');
+
                         document.body.innerHTML = doc.body.innerHTML;
+
+                        // Restore dark mode class (prevents flash/toggle bug)
+                        if (wasDarkMode) {
+                            document.documentElement.classList.add('dark');
+                        } else {
+                            document.documentElement.classList.remove('dark');
+                        }
 
                         // Re-apply preserved modal states
                         if (isCartModalOpen) {

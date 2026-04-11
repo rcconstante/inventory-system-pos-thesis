@@ -241,13 +241,15 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 
 // ─── Batch / FIFO Functions ────────────────────────────────────────────
 
-function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acquisitionCost = null, ?string $manufacturingDate = null, ?string $expirationDate = null): int
+function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acquisitionCost = null, ?string $manufacturingDate = null, ?string $expirationDate = null, ?string $batchNumber = null): int
 {
-    $batchNumber = 'BATCH-' . $productId . '-' . date('YmdHis') . '-' . random_int(100, 999);
+    if ($batchNumber === null) {
+        $batchNumber = 'BATCH-' . $productId . '-' . date('YmdHis') . '-' . random_int(100, 999);
+    }
 
     $statement = $pdo->prepare(
-        'INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted)
-         VALUES (:product_id, :batch_number, :acquisition_cost, :manufacturing_date, :expiration_date, :quantity_received, :quantity_remaining, 0)'
+        'INSERT INTO Stock_Batch (product_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, is_depleted, status)
+         VALUES (:product_id, :batch_number, :acquisition_cost, :manufacturing_date, :expiration_date, :quantity_received, :quantity_remaining, 0, \'ACTIVE\')'
     );
     $statement->execute([
         'product_id' => $productId,
@@ -259,13 +261,16 @@ function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acq
         'quantity_remaining' => $quantity,
     ]);
 
-    return (int) $pdo->lastInsertId();
+    $batchId = (int) $pdo->lastInsertId();
+    sync_inventory_from_batches($pdo, $productId);
+
+    return $batchId;
 }
 
 function sync_inventory_from_batches(PDO $pdo, int $productId): void
 {
     $statement = $pdo->prepare(
-        'SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0'
+        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE'"
     );
     $statement->execute(['product_id' => $productId]);
     $totalStock = (int) $statement->fetchColumn();
@@ -277,12 +282,12 @@ function sync_inventory_from_batches(PDO $pdo, int $productId): void
 function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleItemId): void
 {
     $batchStatement = $pdo->prepare(
-        'SELECT batch_id, quantity_remaining
+        "SELECT batch_id, quantity_remaining
          FROM Stock_Batch
-         WHERE product_id = :product_id AND is_depleted = 0
+         WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE'
            AND (expiration_date IS NULL OR expiration_date >= CURDATE())
          ORDER BY date_received ASC, batch_id ASC
-         FOR UPDATE'
+         FOR UPDATE"
     );
     $batchStatement->execute(['product_id' => $productId]);
     $batches = $batchStatement->fetchAll(PDO::FETCH_ASSOC);
@@ -332,13 +337,62 @@ function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleIte
 function fetch_batches_for_product(PDO $pdo, int $productId): array
 {
     $statement = $pdo->prepare(
-        'SELECT batch_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, date_received, is_depleted
+        "SELECT batch_id, batch_number, acquisition_cost, manufacturing_date, expiration_date, quantity_received, quantity_remaining, date_received, is_depleted, COALESCE(status, 'ACTIVE') AS status
          FROM Stock_Batch
          WHERE product_id = :product_id
-         ORDER BY date_received ASC, batch_id ASC'
+         ORDER BY date_received ASC, batch_id ASC"
     );
     $statement->execute(['product_id' => $productId]);
     return $statement->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function update_stock_batch(PDO $pdo, int $batchId, array $data): void
+{
+    $statement = $pdo->prepare(
+        'UPDATE Stock_Batch
+         SET batch_number = :batch_number,
+             acquisition_cost = :acquisition_cost,
+             manufacturing_date = :manufacturing_date,
+             expiration_date = :expiration_date,
+             quantity_remaining = :quantity_remaining,
+             status = :status,
+             is_depleted = CASE WHEN :status2 != \'ACTIVE\' OR :qty2 <= 0 THEN 1 ELSE 0 END
+         WHERE batch_id = :batch_id'
+    );
+    $statement->execute([
+        'batch_number' => $data['batch_number'],
+        'acquisition_cost' => $data['acquisition_cost'],
+        'manufacturing_date' => $data['manufacturing_date'],
+        'expiration_date' => $data['expiration_date'],
+        'quantity_remaining' => $data['quantity_remaining'],
+        'status' => $data['status'],
+        'status2' => $data['status'],
+        'qty2' => $data['quantity_remaining'],
+        'batch_id' => $batchId,
+    ]);
+
+    // Get product_id from batch to sync inventory
+    $pidStmt = $pdo->prepare('SELECT product_id FROM Stock_Batch WHERE batch_id = :batch_id');
+    $pidStmt->execute(['batch_id' => $batchId]);
+    $productId = (int) $pidStmt->fetchColumn();
+    if ($productId > 0) {
+        sync_inventory_from_batches($pdo, $productId);
+    }
+}
+
+function delete_stock_batch(PDO $pdo, int $batchId): void
+{
+    // Get product_id before deletion
+    $pidStmt = $pdo->prepare('SELECT product_id FROM Stock_Batch WHERE batch_id = :batch_id');
+    $pidStmt->execute(['batch_id' => $batchId]);
+    $productId = (int) $pidStmt->fetchColumn();
+
+    $statement = $pdo->prepare('DELETE FROM Stock_Batch WHERE batch_id = :batch_id');
+    $statement->execute(['batch_id' => $batchId]);
+
+    if ($productId > 0) {
+        sync_inventory_from_batches($pdo, $productId);
+    }
 }
 
 function restore_stock_to_batches(PDO $pdo, int $saleItemId): void

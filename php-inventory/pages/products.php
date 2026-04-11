@@ -155,11 +155,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($inventoryRow) {
                     $updateInventory = $pdo->prepare(
                         'UPDATE Inventory
-                         SET current_stock = :current_stock, min_stock_level = :min_stock_level, expiry_date = :expiry_date
+                         SET min_stock_level = :min_stock_level, expiry_date = :expiry_date
                          WHERE product_id = :product_id'
                     );
                     $updateInventory->execute([
-                        'current_stock' => $currentStock,
                         'min_stock_level' => $minStockLevel,
                         'expiry_date' => $expiryDate,
                         'product_id' => $productId,
@@ -202,6 +201,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             set_flash('success', 'Product deleted successfully.');
+        } elseif (isset($_POST['add_batch'])) {
+            $productId = (int) ($_POST['product_id'] ?? 0);
+            $batchNumber = trim((string) ($_POST['batch_number'] ?? ''));
+            $batchQty = max(0, (int) ($_POST['batch_qty'] ?? 0));
+            $batchCost = ($_POST['batch_cost'] ?? '') !== '' ? (float) $_POST['batch_cost'] : null;
+            $batchMfgDate = !empty($_POST['batch_mfg_date']) ? $_POST['batch_mfg_date'] : null;
+            $batchExpDate = !empty($_POST['batch_exp_date']) ? $_POST['batch_exp_date'] : null;
+
+            if ($productId <= 0) { throw new RuntimeException('Invalid product.'); }
+            if ($batchNumber === '') { throw new RuntimeException('Batch number is required.'); }
+            if ($batchQty <= 0) { throw new RuntimeException('Quantity must be at least 1.'); }
+
+            $pdo->beginTransaction();
+            create_stock_batch($pdo, $productId, $batchQty, $batchCost, $batchMfgDate, $batchExpDate, $batchNumber);
+            sync_reorder_alerts_for_catalog($pdo);
+            $pdo->commit();
+
+            set_flash('success', 'Batch added successfully.');
+        } elseif (isset($_POST['edit_batch'])) {
+            $batchId = (int) ($_POST['batch_id'] ?? 0);
+            $batchNumber = trim((string) ($_POST['batch_number'] ?? ''));
+            $batchQty = max(0, (int) ($_POST['batch_qty'] ?? 0));
+            $batchCost = ($_POST['batch_cost'] ?? '') !== '' ? (float) $_POST['batch_cost'] : null;
+            $batchMfgDate = !empty($_POST['batch_mfg_date']) ? $_POST['batch_mfg_date'] : null;
+            $batchExpDate = !empty($_POST['batch_exp_date']) ? $_POST['batch_exp_date'] : null;
+            $batchStatus = in_array(($_POST['batch_status'] ?? ''), ['ACTIVE','EXPIRED','DISPOSED'], true) ? $_POST['batch_status'] : 'ACTIVE';
+
+            if ($batchId <= 0) { throw new RuntimeException('Invalid batch.'); }
+            if ($batchNumber === '') { throw new RuntimeException('Batch number is required.'); }
+
+            $pdo->beginTransaction();
+            update_stock_batch($pdo, $batchId, [
+                'batch_number' => $batchNumber,
+                'acquisition_cost' => $batchCost,
+                'manufacturing_date' => $batchMfgDate,
+                'expiration_date' => $batchExpDate,
+                'quantity_remaining' => $batchQty,
+                'status' => $batchStatus,
+            ]);
+            sync_reorder_alerts_for_catalog($pdo);
+            $pdo->commit();
+
+            set_flash('success', 'Batch updated successfully.');
+        } elseif (isset($_POST['delete_batch'])) {
+            $batchId = (int) ($_POST['batch_id'] ?? 0);
+            if ($batchId <= 0) { throw new RuntimeException('Invalid batch.'); }
+
+            $pdo->beginTransaction();
+            delete_stock_batch($pdo, $batchId);
+            sync_reorder_alerts_for_catalog($pdo);
+            $pdo->commit();
+
+            set_flash('success', 'Batch deleted successfully.');
         }
     } catch (RuntimeException $exception) {
         if ($pdo->inTransaction()) {
@@ -214,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->rollBack();
         }
 
-        set_flash('error', 'The product action could not be completed.');
+        set_flash('error', 'The action could not be completed.');
     }
 
     redirect_to('pages/products.php');
@@ -225,6 +277,43 @@ $categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
 
 $selectedCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
 $searchTerm = trim((string) ($_GET['search'] ?? ''));
+
+// Count total products for pagination
+$countQuery = "
+    SELECT COUNT(*)
+    FROM Products p
+    LEFT JOIN Category c ON p.category_id = c.category_id
+    WHERE 1=1
+";
+$queryParams = [];
+if ($selectedCategoryId > 0) {
+    $countQuery .= ' AND p.category_id = :category_id';
+    $queryParams['category_id'] = $selectedCategoryId;
+}
+if ($searchTerm !== '') {
+    $countQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5)';
+    $queryParams['st1'] = '%' . $searchTerm . '%';
+    $queryParams['st2'] = '%' . $searchTerm . '%';
+    $queryParams['st3'] = '%' . $searchTerm . '%';
+    $queryParams['st4'] = '%' . $searchTerm . '%';
+    $queryParams['st5'] = '%' . $searchTerm . '%';
+}
+$countStmt = $pdo->prepare($countQuery);
+foreach ($queryParams as $param => $value) {
+    if ($param === 'category_id') {
+        $countStmt->bindValue(':category_id', $value, PDO::PARAM_INT);
+    } else {
+        $countStmt->bindValue(':' . $param, $value, PDO::PARAM_STR);
+    }
+}
+$countStmt->execute();
+$totalProducts = (int) $countStmt->fetchColumn();
+
+$perPage = 10;
+$currentPage = max(1, (int) ($_GET['page'] ?? 1));
+$totalPages = max(1, (int) ceil($totalProducts / $perPage));
+if ($currentPage > $totalPages) { $currentPage = $totalPages; }
+$offset = ($currentPage - 1) * $perPage;
 
 $productsQuery = "
     SELECT
@@ -246,21 +335,14 @@ $productsQuery = "
     WHERE 1=1
 ";
 
-$queryParams = [];
 if ($selectedCategoryId > 0) {
     $productsQuery .= ' AND p.category_id = :category_id';
-    $queryParams['category_id'] = $selectedCategoryId;
 }
 if ($searchTerm !== '') {
     $productsQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5)';
-    $queryParams['st1'] = '%' . $searchTerm . '%';
-    $queryParams['st2'] = '%' . $searchTerm . '%';
-    $queryParams['st3'] = '%' . $searchTerm . '%';
-    $queryParams['st4'] = '%' . $searchTerm . '%';
-    $queryParams['st5'] = '%' . $searchTerm . '%';
 }
 
-$productsQuery .= ' ORDER BY p.product_name ASC';
+$productsQuery .= ' ORDER BY p.product_name ASC LIMIT :limit OFFSET :offset';
 $productsStatement = $pdo->prepare($productsQuery);
 foreach ($queryParams as $param => $value) {
     if ($param === 'category_id') {
@@ -269,6 +351,8 @@ foreach ($queryParams as $param => $value) {
         $productsStatement->bindValue(':' . $param, $value, PDO::PARAM_STR);
     }
 }
+$productsStatement->bindValue(':limit', $perPage, PDO::PARAM_INT);
+$productsStatement->bindValue(':offset', $offset, PDO::PARAM_INT);
 $productsStatement->execute();
 $products = $productsStatement->fetchAll(PDO::FETCH_ASSOC);
 
@@ -276,17 +360,16 @@ $recommendations = recommendations_enabled()
     ? fetch_recommendations_for_products($pdo, array_map(static fn (array $product): int => (int) $product['product_id'], $products))
     : [];
 
-// Compute average sales count to classify products relatively (consistent with dashboard ranking)
+// Compute average sales count to classify products relatively
 $allSalesCounts = array_map(static fn (array $p): int => (int) ($p['sales_count'] ?? 0), $products);
 $avgSalesCount = count($allSalesCounts) > 0 ? array_sum($allSalesCounts) / count($allSalesCounts) : 0;
 
-$page_title = 'PRODUCTS';
+$page_title = 'INVENTORY';
 include '../includes/header.php';
 ?>
 
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
     <form method="GET" class="flex items-center gap-4 flex-wrap">
-        <span class="text-sm font-medium">Stock Inventory</span>
         <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
             <option value="0">All Categories</option>
             <?php foreach ($categories as $category): ?>
@@ -309,7 +392,7 @@ include '../includes/header.php';
     <?php endif; ?>
 </div>
 
-<div class="overflow-x-auto bg-white dark:bg-gray-800 mb-8">
+<div class="overflow-x-auto bg-white dark:bg-gray-800 mb-4">
     <table class="w-full border-collapse border border-black dark:border-gray-600 text-sm">
         <thead>
             <tr class="text-sm font-bold uppercase text-gray-700 dark:text-gray-300">
@@ -317,16 +400,17 @@ include '../includes/header.php';
                 <th class="border border-black dark:border-gray-600 p-4 text-left">PRODUCTS</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center">CATEGORY</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center">PRICE</th>
-                <th class="border border-black dark:border-gray-600 p-4 text-center w-[130px]">EXP DATE</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center w-[90px]">STOCK</th>
-                <th class="border border-black dark:border-gray-600 p-4 text-center w-[110px]">SALES COUNT</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center w-[150px]">STATUS</th>
+                <?php if ($canManage): ?>
+                    <th class="border border-black dark:border-gray-600 p-4 text-center w-[180px]">ACTION</th>
+                <?php endif; ?>
             </tr>
         </thead>
         <tbody>
         <?php if ($products === []): ?>
             <tr>
-                <td colspan="8" class="border border-black dark:border-gray-600 p-8 text-center text-gray-500 dark:text-gray-400">No products found.</td>
+                <td colspan="<?php echo $canManage ? '7' : '6'; ?>" class="border border-black dark:border-gray-600 p-8 text-center text-gray-500 dark:text-gray-400">No products found.</td>
             </tr>
         <?php else: ?>
             <?php foreach ($products as $product): ?>
@@ -335,11 +419,7 @@ include '../includes/header.php';
                 $currentStock = (int) $product['current_stock'];
                 $minStockLevel = (int) $product['min_stock_level'];
                 $salesCount = (int) ($product['sales_count'] ?? 0);
-                
-                // Classify relative to the average across displayed products (consistent with dashboard ranking)
                 $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
-
-                $productRecommendations = $recommendations[$productId] ?? [];
                 ?>
                 <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer" onclick="openProductDetailModal(<?php echo $productId; ?>)">
                     <td class="border border-black dark:border-gray-600 p-4 text-center font-medium dark:text-gray-100">
@@ -349,24 +429,57 @@ include '../includes/header.php';
                         <div class="font-medium text-black dark:text-gray-100"><?php echo h($product['product_name']); ?></div>
                         <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             <?php echo h($product['brand'] ?: 'No brand'); ?>
-                            <?php if ($product['product_type'] !== ''): ?>
-                                <span class="mx-1">|</span>
-                                <?php echo h($product['product_type']); ?>
-                            <?php endif; ?>
-                            <?php if ($product['compatibility'] !== ''): ?>
+                            <?php if ($product['compatibility'] !== '' && $product['compatibility'] !== null): ?>
                                 <span class="mx-1">|</span>
                                 <?php echo h($product['compatibility']); ?>
                             <?php endif; ?>
                         </div>
                     </td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['category_name'] ?? 'N/A'); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100">&#8369;<?php echo h(money_format_php((float) $product['price'])); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h($product['expiry_date'] ? date('M d, Y', strtotime($product['expiry_date'])) : 'N/A'); ?></td>
+                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h(number_format((float) $product['price'], 2)); ?></td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center <?php echo $currentStock <= $minStockLevel && $minStockLevel > 0 ? 'text-red-600 font-bold' : 'text-black dark:text-gray-100'; ?>"><?php echo h((string) $currentStock); ?></td>
-                    <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100"><?php echo h((string) $salesCount); ?></td>
                     <td class="border border-black dark:border-gray-600 p-4 text-center text-black dark:text-gray-100">
                         <span class="text-xs font-semibold uppercase <?php echo $statusLabel === 'FAST MOVING' ? 'text-green-600' : 'text-orange-500'; ?>"><?php echo h($statusLabel); ?></span>
                     </td>
+                    <?php if ($canManage): ?>
+                        <td class="border border-black dark:border-gray-600 p-4 text-center" onclick="event.stopPropagation()">
+                            <div class="flex items-center justify-center gap-2">
+                                <button type="button" title="Edit" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                                    data-product-id="<?php echo $productId; ?>"
+                                    data-product-name="<?php echo h($product['product_name']); ?>"
+                                    data-category-id="<?php echo (int)($product['category_id'] ?? 0); ?>"
+                                    data-brand="<?php echo h($product['brand'] ?? ''); ?>"
+                                    data-description="<?php echo h($product['description'] ?? ''); ?>"
+                                    data-price="<?php echo (float)$product['price']; ?>"
+                                    data-retail-price="<?php echo $product['retail_price'] !== null ? (float)$product['retail_price'] : ''; ?>"
+                                    data-acquisition-cost="<?php echo $product['acquisition_cost'] !== null ? (float)$product['acquisition_cost'] : ''; ?>"
+                                    data-manufacturing-date="<?php echo h($product['manufacturing_date'] ?? ''); ?>"
+                                    data-product-type="<?php echo h($product['product_type'] ?? ''); ?>"
+                                    data-specification="<?php echo h($product['specification'] ?? ''); ?>"
+                                    data-compatibility="<?php echo h($product['compatibility'] ?? ''); ?>"
+                                    data-current-stock="<?php echo $currentStock; ?>"
+                                    data-min-stock-level="<?php echo $minStockLevel; ?>"
+                                    data-expiry-date="<?php echo h($product['expiry_date'] ?? ''); ?>"
+                                    onclick="openEditProductModal(this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                </button>
+                                <?php if ($canDelete): ?>
+                                <button type="button" title="Delete" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                                    data-product-id="<?php echo $productId; ?>"
+                                    data-product-name="<?php echo h($product['product_name']); ?>"
+                                    onclick="openDeleteProductModal(this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                </button>
+                                <?php endif; ?>
+                                <button type="button" title="View Details" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openProductDetailModal(<?php echo $productId; ?>)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                                <button type="button" title="Batch Management" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openBatchModal(<?php echo $productId; ?>)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                                </button>
+                            </div>
+                        </td>
+                    <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
         <?php endif; ?>
@@ -374,7 +487,32 @@ include '../includes/header.php';
     </table>
 </div>
 
+<!-- Pagination -->
+<div class="flex justify-end gap-3 mb-8">
+    <?php
+    $paginationParams = [];
+    if ($selectedCategoryId > 0) { $paginationParams['category_id'] = $selectedCategoryId; }
+    if ($searchTerm !== '') { $paginationParams['search'] = $searchTerm; }
+    ?>
+    <?php if ($currentPage > 1): ?>
+        <?php $paginationParams['page'] = $currentPage - 1; ?>
+        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Previous</a>
+    <?php else: ?>
+        <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Previous</button>
+    <?php endif; ?>
+
+    <span class="flex items-center text-sm text-gray-600 dark:text-gray-400">Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></span>
+
+    <?php if ($currentPage < $totalPages): ?>
+        <?php $paginationParams['page'] = $currentPage + 1; ?>
+        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Next</a>
+    <?php else: ?>
+        <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Next</button>
+    <?php endif; ?>
+</div>
+
 <?php if ($canManage): ?>
+    <!-- Add Product Modal -->
     <div id="addProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-8 shadow-xl dark:text-gray-100">
             <h2 class="text-xl font-bold mb-6">ADD PRODUCT</h2>
@@ -389,10 +527,11 @@ include '../includes/header.php';
         </div>
     </div>
 
+    <!-- Edit Product Modal -->
     <div id="editProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
             <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
-                <h2 class="text-xl font-bold">Edit Product</h2>
+                <h2 class="text-xl font-bold">ADD/EDIT PRODUCT DETAILS</h2>
                 <button type="button" onclick="toggleProductModal('editProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
             </div>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>" class="space-y-4">
@@ -400,13 +539,15 @@ include '../includes/header.php';
                 <input type="hidden" name="product_id" id="edit_product_id">
                 <?php $formPrefix = 'edit_'; include __DIR__ . '/product_form_fields.php'; ?>
                 <div class="flex justify-end gap-2 border-t dark:border-gray-600 pt-4">
-                    <button type="button" onclick="toggleProductModal('editProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
+                    <button type="button" onclick="toggleProductModal('editProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Close</button>
                     <button type="submit" name="edit_product" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Changes</button>
                 </div>
             </form>
         </div>
     </div>
+
     <?php if ($canDelete): ?>
+    <!-- Delete Product Modal -->
     <div id="deleteProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
             <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
@@ -429,31 +570,155 @@ include '../includes/header.php';
 
 <!-- Product Detail Modal -->
 <div id="productDetailModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-2xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col" style="max-height:90vh;">
-        <div class="flex items-center justify-between border-b dark:border-gray-700 p-4">
-            <h3 id="detailProductTitle" class="text-lg font-bold dark:text-white"></h3>
-            <button type="button" onclick="toggleProductModal('productDetailModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
+    <div class="w-full max-w-xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col" style="max-height:90vh;">
+        <div class="flex items-center justify-between border-b dark:border-gray-700 p-5">
+            <h3 class="text-lg font-bold dark:text-white">PRODUCT DETAILS</h3>
+            <button type="button" onclick="toggleProductModal('productDetailModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
         </div>
-        <div id="detailProductContent" class="p-4 overflow-y-auto dark:text-gray-100"></div>
+        <div id="detailProductContent" class="p-5 overflow-y-auto dark:text-gray-100"></div>
         <div id="detailProductActions" class="flex justify-end gap-2 border-t dark:border-gray-700 p-4"></div>
     </div>
 </div>
 
+<!-- Batch Management Modal -->
+<div id="batchManagementModal" class="hidden fixed inset-0 z-[60] items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl rounded-lg bg-white dark:bg-gray-800 shadow-lg flex flex-col dark:text-gray-100" style="max-height:90vh;">
+        <div class="flex items-center justify-between border-b dark:border-gray-700 p-5">
+            <h3 class="text-lg font-bold">BATCH MANAGEMENT</h3>
+            <button type="button" onclick="toggleProductModal('batchManagementModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+        </div>
+        <div id="batchModalContent" class="p-5 overflow-y-auto"></div>
+        <div class="flex justify-end gap-2 border-t dark:border-gray-700 p-4">
+            <button type="button" onclick="toggleProductModal('batchManagementModal', false)" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add Batch Modal -->
+<div id="addBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 shadow-lg p-6 dark:text-gray-100">
+        <h3 class="text-lg font-bold mb-4">ADD NEW BATCH</h3>
+        <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="product_id" id="addBatch_product_id">
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Batch Number</label>
+                    <input type="text" name="batch_number" id="addBatch_number" required class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Quantity</label>
+                    <input type="number" name="batch_qty" min="1" required class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Cost Price</label>
+                    <input type="number" step="0.01" min="0" name="batch_cost" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Manufacturing Date</label>
+                    <input type="date" name="batch_mfg_date" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Expiration Date</label>
+                    <input type="date" name="batch_exp_date" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" onclick="toggleProductModal('addBatchModal', false)" class="rounded border dark:border-gray-500 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Close</button>
+                <button type="submit" name="add_batch" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Edit Batch Modal -->
+<div id="editBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-md rounded-lg bg-white dark:bg-gray-800 shadow-lg p-6 dark:text-gray-100">
+        <h3 class="text-lg font-bold mb-2">EDIT BATCH</h3>
+        <p class="text-sm mb-4"><span class="font-bold">Product:</span> <span id="editBatch_productName"></span></p>
+        <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="batch_id" id="editBatch_id">
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Batch Number</label>
+                    <input type="text" name="batch_number" id="editBatch_number" required class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Cost Price</label>
+                    <input type="number" step="0.01" min="0" name="batch_cost" id="editBatch_cost" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Manufacturing Date</label>
+                    <input type="date" name="batch_mfg_date" id="editBatch_mfg" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Quantity</label>
+                    <input type="number" name="batch_qty" id="editBatch_qty" min="0" required class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Expiration Date</label>
+                    <input type="date" name="batch_exp_date" id="editBatch_exp" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Status</label>
+                    <select name="batch_status" id="editBatch_status" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                        <option value="ACTIVE">ACTIVE</option>
+                        <option value="EXPIRED">EXPIRED</option>
+                        <option value="DISPOSED">DISPOSED</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" onclick="toggleProductModal('editBatchModal', false)" class="rounded border dark:border-gray-500 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Close</button>
+                <button type="submit" name="edit_batch" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete Batch Confirm Modal -->
+<div id="deleteBatchModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
+        <h2 class="text-lg font-bold mb-4">Delete Batch</h2>
+        <p class="mb-6 text-sm">Are you sure you want to delete batch <strong id="deleteBatchName"></strong>?</p>
+        <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="batch_id" id="deleteBatch_id">
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="toggleProductModal('deleteBatchModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+                <button type="submit" name="delete_batch" class="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
+    // ─── Utility Functions (defined first, before productData) ───
     function toggleProductModal(modalId, shouldOpen) {
         var modal = document.getElementById(modalId);
-        if (!modal) {
-            return;
-        }
-
+        if (!modal) return;
         if (shouldOpen) {
             modal.classList.remove('hidden');
             modal.classList.add('flex');
-            return;
+        } else {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
         }
+    }
 
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(text || ''));
+        return div.innerHTML;
+    }
+
+    function escapeAttr(text) {
+        return (text || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     function openEditProductModal(button) {
@@ -481,142 +746,187 @@ include '../includes/header.php';
         toggleProductModal('deleteProductModal', true);
     }
 
-    // Product Detail Modal
-    var productData = <?php echo json_encode(array_map(function($p) use ($pdo, $recommendations, $canManage) {
-        $batches = fetch_batches_for_product($pdo, (int)$p['product_id']);
-        $recs = $recommendations[(int)$p['product_id']] ?? [];
-        return [
-            'id' => (int)$p['product_id'],
-            'name' => $p['product_name'],
-            'brand' => $p['brand'] ?? '',
-            'category' => $p['category_name'] ?? 'N/A',
-            'category_id' => (int)($p['category_id'] ?? 0),
-            'description' => $p['description'] ?? '',
-            'price' => (float)$p['price'],
-            'retail_price' => $p['retail_price'] !== null ? (float)$p['retail_price'] : null,
-            'acquisition_cost' => $p['acquisition_cost'] !== null ? (float)$p['acquisition_cost'] : null,
-            'manufacturing_date' => $p['manufacturing_date'] ?? '',
-            'expiration_date' => $p['expiration_date'] ?? '',
-            'product_type' => $p['product_type'] ?? '',
-            'specification' => $p['specification'] ?? '',
-            'compatibility' => $p['compatibility'] ?? '',
-            'current_stock' => (int)$p['current_stock'],
-            'min_stock_level' => (int)$p['min_stock_level'],
-            'expiry_date' => $p['expiry_date'] ?? '',
-            'sales_count' => (int)($p['sales_count'] ?? 0),
-            'batches' => array_map(function($b) {
-                return [
-                    'batch_number' => $b['batch_number'],
-                    'qty_remaining' => (int)$b['quantity_remaining'],
-                    'qty_received' => (int)$b['quantity_received'],
-                    'acquisition_cost' => $b['acquisition_cost'] !== null ? (float)$b['acquisition_cost'] : null,
-                    'manufacturing_date' => $b['manufacturing_date'] ?? '',
-                    'expiration_date' => $b['expiration_date'] ?? '',
-                    'date_received' => $b['date_received'] ?? '',
-                    'is_depleted' => (int)$b['is_depleted'],
-                ];
-            }, $batches),
-            'recommendations' => array_map(function($r) {
-                return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
-            }, array_slice($recs, 0, 5)),
-            'can_manage' => $canManage,
-        ];
-    }, $products)); ?>;
+    // ─── Product Data (may fail if DB has non-UTF8 chars — wrapped in try/catch) ───
+    var productData = [];
+    try {
+        productData = <?php echo json_encode(array_map(function($p) use ($pdo, $recommendations, $canManage, $avgSalesCount) {
+            $batches = fetch_batches_for_product($pdo, (int)$p['product_id']);
+            $recs = $recommendations[(int)$p['product_id']] ?? [];
+            $salesCount = (int)($p['sales_count'] ?? 0);
+            $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
+            return [
+                'id' => (int)$p['product_id'],
+                'name' => $p['product_name'],
+                'brand' => $p['brand'] ?? '',
+                'category' => $p['category_name'] ?? 'N/A',
+                'category_id' => (int)($p['category_id'] ?? 0),
+                'description' => $p['description'] ?? '',
+                'price' => (float)$p['price'],
+                'retail_price' => $p['retail_price'] !== null ? (float)$p['retail_price'] : null,
+                'acquisition_cost' => $p['acquisition_cost'] !== null ? (float)$p['acquisition_cost'] : null,
+                'manufacturing_date' => $p['manufacturing_date'] ?? '',
+                'expiration_date' => $p['expiration_date'] ?? '',
+                'product_type' => $p['product_type'] ?? '',
+                'specification' => $p['specification'] ?? '',
+                'compatibility' => $p['compatibility'] ?? '',
+                'current_stock' => (int)$p['current_stock'],
+                'min_stock_level' => (int)$p['min_stock_level'],
+                'expiry_date' => $p['expiry_date'] ?? '',
+                'sales_count' => $salesCount,
+                'status_label' => $statusLabel,
+                'batches' => array_map(function($b) {
+                    return [
+                        'batch_id' => (int)$b['batch_id'],
+                        'batch_number' => $b['batch_number'],
+                        'qty_remaining' => (int)$b['quantity_remaining'],
+                        'qty_received' => (int)$b['quantity_received'],
+                        'acquisition_cost' => $b['acquisition_cost'] !== null ? (float)$b['acquisition_cost'] : null,
+                        'manufacturing_date' => $b['manufacturing_date'] ?? '',
+                        'expiration_date' => $b['expiration_date'] ?? '',
+                        'date_received' => $b['date_received'] ?? '',
+                        'is_depleted' => (int)$b['is_depleted'],
+                        'status' => $b['status'] ?? 'ACTIVE',
+                    ];
+                }, $batches),
+                'recommendations' => array_map(function($r) {
+                    return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
+                }, array_slice($recs, 0, 5)),
+                'can_manage' => $canManage,
+            ];
+        }, $products), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '[]'; ?>;
+    } catch(e) {
+        console.error('Failed to parse product data:', e);
+    }
 
+    // ─── Product Detail Modal ───
     function openProductDetailModal(productId) {
         var product = productData.find(function(p) { return p.id === productId; });
         if (!product) return;
 
-        var html = '<div class="space-y-4">';
-        html += '<div class="grid grid-cols-2 gap-4 text-sm">';
+        var html = '<div class="space-y-3 text-sm">';
         html += '<div><span class="font-bold">Product ID:</span> P' + String(product.id).padStart(3, '0') + '</div>';
+        html += '<div><span class="font-bold">Product Name:</span> ' + escapeHtml(product.name) + '</div>';
         html += '<div><span class="font-bold">Category:</span> ' + escapeHtml(product.category) + '</div>';
         html += '<div><span class="font-bold">Brand:</span> ' + escapeHtml(product.brand || 'N/A') + '</div>';
-        html += '<div><span class="font-bold">Type:</span> ' + escapeHtml(product.product_type || 'N/A') + '</div>';
         html += '<div><span class="font-bold">Selling Price:</span> ₱' + product.price.toFixed(2) + '</div>';
-        if (product.retail_price !== null) html += '<div><span class="font-bold">Retail Price:</span> ₱' + product.retail_price.toFixed(2) + '</div>';
-        if (product.acquisition_cost !== null) html += '<div><span class="font-bold">Acquisition Cost:</span> ₱' + product.acquisition_cost.toFixed(2) + '</div>';
-        html += '<div><span class="font-bold">Stock:</span> ' + product.current_stock + '</div>';
-        html += '<div><span class="font-bold">Critical Stock:</span> ' + product.min_stock_level + '</div>';
-        html += '<div><span class="font-bold">Sales Count:</span> ' + product.sales_count + '</div>';
-        if (product.manufacturing_date) html += '<div><span class="font-bold">Mfg Date:</span> ' + product.manufacturing_date + '</div>';
-        if (product.expiry_date) html += '<div><span class="font-bold">Exp Date:</span> ' + product.expiry_date + '</div>';
-        html += '</div>';
+        html += '<div><span class="font-bold">Critical Stock:</span> ' + product.min_stock_level + ' pcs</div>';
+        html += '<div class="mt-3"><span class="font-bold">Total Stock:</span> ' + product.current_stock + ' pcs</div>';
+        html += '<div><span class="font-bold">Status:</span> <span class="' + (product.status_label === 'FAST MOVING' ? 'text-green-600' : 'text-orange-500') + ' font-bold">' + product.status_label + '</span></div>';
 
-        if (product.compatibility) html += '<div class="text-sm"><span class="font-bold">Compatibility:</span> ' + escapeHtml(product.compatibility) + '</div>';
-        if (product.specification) html += '<div class="text-sm"><span class="font-bold">Specification:</span> ' + escapeHtml(product.specification) + '</div>';
-        if (product.description) html += '<div class="text-sm"><span class="font-bold">Description:</span> ' + escapeHtml(product.description) + '</div>';
-
-        // Batches
-        html += '<div class="mt-4"><h4 class="font-bold text-sm mb-2 uppercase">Batch Inventory (FIFO)</h4>';
-        if (product.batches.length === 0) {
-            html += '<div class="text-sm text-gray-500">No batches recorded.</div>';
-        } else {
-            html += '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse border border-gray-300 dark:border-gray-600">';
-            html += '<thead><tr class="bg-gray-100 dark:bg-gray-700"><th class="border border-gray-300 dark:border-gray-600 p-2">Batch #</th><th class="border border-gray-300 dark:border-gray-600 p-2">Qty</th><th class="border border-gray-300 dark:border-gray-600 p-2">Cost</th><th class="border border-gray-300 dark:border-gray-600 p-2">Mfg Date</th><th class="border border-gray-300 dark:border-gray-600 p-2">Exp Date</th><th class="border border-gray-300 dark:border-gray-600 p-2">Status</th></tr></thead><tbody>';
-            product.batches.forEach(function(b) {
-                var statusClass = b.is_depleted ? 'text-red-500' : 'text-green-600';
-                var statusText = b.is_depleted ? 'Depleted' : 'Active';
-                html += '<tr><td class="border border-gray-300 dark:border-gray-600 p-2">' + escapeHtml(b.batch_number) + '</td>';
-                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + b.qty_remaining + '/' + b.qty_received + '</td>';
-                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.acquisition_cost !== null ? '₱' + b.acquisition_cost.toFixed(2) : 'N/A') + '</td>';
-                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.manufacturing_date || 'N/A') + '</td>';
-                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.expiration_date || 'N/A') + '</td>';
-                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center ' + statusClass + ' font-bold">' + statusText + '</td></tr>';
-            });
-            html += '</tbody></table></div>';
+        if (product.specification) {
+            html += '<div class="mt-3"><span class="font-bold">Specifications:</span> ' + escapeHtml(product.specification) + '</div>';
         }
-        html += '</div>';
-
-        // Recommendations
-        if (product.recommendations.length > 0) {
-            html += '<div class="mt-4"><h4 class="font-bold text-sm mb-2 uppercase">Recommended Alternatives</h4>';
-            html += '<div class="space-y-1">';
-            product.recommendations.forEach(function(r) {
-                html += '<div class="text-xs flex justify-between border-b dark:border-gray-600 pb-1"><span>' + escapeHtml(r.name) + ' (' + escapeHtml(r.brand) + ')</span><span>₱' + r.price.toFixed(2) + ' | Score: ' + r.score.toFixed(2) + '</span></div>';
+        if (product.compatibility) {
+            html += '<div><span class="font-bold">Compatibility:</span><br>';
+            var parts = product.compatibility.split(',');
+            parts.forEach(function(part) {
+                html += '&nbsp;&nbsp;- ' + escapeHtml(part.trim()) + '<br>';
             });
-            html += '</div></div>';
+            html += '</div>';
         }
 
         html += '</div>';
 
-        document.getElementById('detailProductTitle').textContent = product.name;
         document.getElementById('detailProductContent').innerHTML = html;
 
-        // Show/hide action buttons
-        var actionsDiv = document.getElementById('detailProductActions');
-        if (product.can_manage) {
-            actionsDiv.innerHTML = '<button type="button" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500" ' +
-                'data-product-id="' + product.id + '" ' +
-                'data-product-name="' + escapeAttr(product.name) + '" ' +
-                'data-category-id="' + product.category_id + '" ' +
-                'data-brand="' + escapeAttr(product.brand) + '" ' +
-                'data-description="' + escapeAttr(product.description) + '" ' +
-                'data-price="' + product.price + '" ' +
-                'data-retail-price="' + (product.retail_price !== null ? product.retail_price : '') + '" ' +
-                'data-acquisition-cost="' + (product.acquisition_cost !== null ? product.acquisition_cost : '') + '" ' +
-                'data-manufacturing-date="' + escapeAttr(product.manufacturing_date) + '" ' +
-                'data-product-type="' + escapeAttr(product.product_type) + '" ' +
-                'data-specification="' + escapeAttr(product.specification) + '" ' +
-                'data-compatibility="' + escapeAttr(product.compatibility) + '" ' +
-                'data-current-stock="' + product.current_stock + '" ' +
-                'data-min-stock-level="' + product.min_stock_level + '" ' +
-                'data-expiry-date="' + escapeAttr(product.expiry_date) + '" ' +
-                'onclick="toggleProductModal(\'productDetailModal\', false); openEditProductModal(this);">Edit Product</button>';
-        } else {
-            actionsDiv.innerHTML = '';
-        }
+        // Actions
+        var actionsHtml = '<button type="button" onclick="openBatchModalFromDetail(' + product.id + ')" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700">View Batches</button>';
+        actionsHtml += '<button type="button" onclick="toggleProductModal(\'productDetailModal\', false)" class="rounded border border-black dark:border-gray-500 px-6 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700">Close</button>';
+        document.getElementById('detailProductActions').innerHTML = actionsHtml;
 
         toggleProductModal('productDetailModal', true);
     }
 
-    function escapeHtml(text) {
-        var div = document.createElement('div');
-        div.appendChild(document.createTextNode(text || ''));
-        return div.innerHTML;
+    // ─── Batch Management Modal ───
+    function openBatchModal(productId) {
+        var product = productData.find(function(p) { return p.id === productId; });
+        if (!product) return;
+
+        var html = '<div class="space-y-3 text-sm mb-4">';
+        html += '<div><span class="font-bold">Product ID:</span> P' + String(product.id).padStart(3, '0') + '</div>';
+        html += '<div><span class="font-bold">Product Name:</span> ' + escapeHtml(product.name) + '</div>';
+        html += '<div><span class="font-bold">Critical Stock:</span> ' + product.min_stock_level + ' pcs</div>';
+        html += '<div><span class="font-bold">Total Stock:</span> ' + product.current_stock + ' pcs</div>';
+        html += '</div>';
+
+        <?php if ($canManage): ?>
+        html += '<div class="mb-4"><button type="button" onclick="openAddBatchModal(' + product.id + ')" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg> Add New Batch</button></div>';
+        <?php endif; ?>
+
+        if (product.batches.length === 0) {
+            html += '<div class="text-gray-500 text-center py-4">No batches recorded.</div>';
+        } else {
+            html += '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse border border-gray-300 dark:border-gray-600">';
+            html += '<thead><tr class="bg-gray-100 dark:bg-gray-700 text-left">';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold">Batch No</th>';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">Qty</th>';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">Cost Price</th>';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">MFG Date</th>';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">EXP Date</th>';
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">Status</th>';
+            <?php if ($canManage): ?>
+            html += '<th class="border border-gray-300 dark:border-gray-600 p-2 font-bold text-center">Actions</th>';
+            <?php endif; ?>
+            html += '</tr></thead><tbody>';
+            product.batches.forEach(function(b) {
+                var statusClass = b.status === 'ACTIVE' ? 'text-green-600' : (b.status === 'EXPIRED' ? 'text-red-500' : 'text-gray-500');
+                html += '<tr>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 font-medium">' + escapeHtml(b.batch_number) + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + b.qty_remaining + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.acquisition_cost !== null ? b.acquisition_cost.toFixed(2) : 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.manufacturing_date || 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">' + (b.expiration_date || 'N/A') + '</td>';
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center ' + statusClass + ' font-bold">' + b.status + '</td>';
+                <?php if ($canManage): ?>
+                html += '<td class="border border-gray-300 dark:border-gray-600 p-2 text-center">';
+                html += '<div class="flex items-center justify-center gap-1">';
+                html += '<button type="button" title="Edit" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openEditBatchModal(' + b.batch_id + ', \'' + escapeAttr(product.name) + '\', \'' + escapeAttr(b.batch_number) + '\', ' + (b.acquisition_cost !== null ? b.acquisition_cost : 'null') + ', \'' + escapeAttr(b.manufacturing_date) + '\', ' + b.qty_remaining + ', \'' + escapeAttr(b.expiration_date) + '\', \'' + escapeAttr(b.status) + '\')">';
+                html += '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>';
+                html += '</button>';
+                html += '<button type="button" title="Delete" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openDeleteBatchModal(' + b.batch_id + ', \'' + escapeAttr(b.batch_number) + '\')">';
+                html += '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
+                html += '</button>';
+                html += '</div></td>';
+                <?php endif; ?>
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        document.getElementById('batchModalContent').innerHTML = html;
+        toggleProductModal('batchManagementModal', true);
     }
-    function escapeAttr(text) {
-        return (text || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    function openBatchModalFromDetail(productId) {
+        toggleProductModal('productDetailModal', false);
+        openBatchModal(productId);
+    }
+
+    function openAddBatchModal(productId) {
+        document.getElementById('addBatch_product_id').value = productId;
+        // Suggest next batch number
+        var product = productData.find(function(p) { return p.id === productId; });
+        var nextNum = product ? product.batches.length + 1 : 1;
+        document.getElementById('addBatch_number').value = 'B' + String(nextNum).padStart(3, '0');
+        toggleProductModal('addBatchModal', true);
+    }
+
+    function openEditBatchModal(batchId, productName, batchNumber, cost, mfgDate, qty, expDate, status) {
+        document.getElementById('editBatch_id').value = batchId;
+        document.getElementById('editBatch_productName').textContent = productName;
+        document.getElementById('editBatch_number').value = batchNumber;
+        document.getElementById('editBatch_cost').value = cost !== null ? cost : '';
+        document.getElementById('editBatch_mfg').value = mfgDate || '';
+        document.getElementById('editBatch_qty').value = qty;
+        document.getElementById('editBatch_exp').value = expDate || '';
+        document.getElementById('editBatch_status').value = status || 'ACTIVE';
+        toggleProductModal('editBatchModal', true);
+    }
+
+    function openDeleteBatchModal(batchId, batchNumber) {
+        document.getElementById('deleteBatch_id').value = batchId;
+        document.getElementById('deleteBatchName').textContent = batchNumber;
+        toggleProductModal('deleteBatchModal', true);
     }
 </script>
 

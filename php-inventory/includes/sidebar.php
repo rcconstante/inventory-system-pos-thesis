@@ -13,7 +13,7 @@ $menuItems = match ($currentRoleId) {
     APP_ROLE_ADMIN => [
         ['label' => 'DASHBOARD', 'href' => 'pages/admin_dashboard.php', 'icon' => $iconDashboard],
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',        'icon' => $iconCategory],
-        ['label' => 'PRODUCTS',  'href' => 'pages/products.php',        'icon' => $iconProducts],
+        ['label' => 'INVENTORY', 'href' => 'pages/products.php',        'icon' => $iconProducts],
         ['label' => 'POS',       'href' => 'pages/pos.php',             'icon' => $iconPos],
         ['label' => 'USERS',     'href' => 'pages/users.php',           'icon' => $iconUsers],
         ['label' => 'REPORTS',   'href' => 'pages/records.php',         'icon' => $iconRecords],
@@ -21,13 +21,13 @@ $menuItems = match ($currentRoleId) {
     APP_ROLE_CASHIER => [
         ['label' => 'DASHBOARD', 'href' => 'pages/cashier_dashboard.php', 'icon' => $iconDashboard],
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',          'icon' => $iconCategory],
-        ['label' => 'PRODUCTS',  'href' => 'pages/products.php',          'icon' => $iconProducts],
+        ['label' => 'INVENTORY', 'href' => 'pages/products.php',          'icon' => $iconProducts],
         ['label' => 'POS',       'href' => 'pages/pos.php',               'icon' => $iconPos],
         ['label' => 'REPORTS',   'href' => 'pages/records.php',           'icon' => $iconRecords],
     ],
     APP_ROLE_STAFF => [
         ['label' => 'CATEGORY',  'href' => 'pages/category.php',        'icon' => $iconCategory],
-        ['label' => 'PRODUCTS',  'href' => 'pages/products.php',        'icon' => $iconProducts],
+        ['label' => 'INVENTORY', 'href' => 'pages/products.php',        'icon' => $iconProducts],
     ],
     default => [],
 };

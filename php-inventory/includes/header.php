@@ -122,7 +122,7 @@ $isDarkMode = isset($_COOKIE['dark_mode']) && $_COOKIE['dark_mode'] === '1';
                     <?php echo date('d/m/Y'); ?>
                 </div>
                 <div class="flex items-center gap-4">
-                    <?php if (current_role_id() === APP_ROLE_CASHIER): ?>
+                    <?php if (in_array(current_role_id(), [APP_ROLE_ADMIN, APP_ROLE_CASHIER], true)): ?>
                         <?php
                             $cartCount = 0;
                             if (isset($_SESSION['cart']) && is_array($_SESSION['cart'])) {
