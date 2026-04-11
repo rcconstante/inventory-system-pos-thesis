@@ -323,30 +323,42 @@ include '../includes/header.php';
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">NO.</th>
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PCODE</th>
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
-                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">CATEGORY</th>
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
-                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">STOCK</th>
+                        <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-black dark:divide-black">
                     <?php $no = 1; foreach ($products as $product): ?>
-                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                            onclick="openQtyPopup(<?php echo (int)$product['product_id']; ?>, <?php echo h(json_encode($product['product_name'])); ?>, <?php echo (float)$product['price']; ?>, <?php echo (int)$product['current_stock']; ?>, <?php echo h(json_encode($product['specification'] ?? '')); ?>, <?php echo h(json_encode($product['compatibility'] ?? '')); ?>)">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                             <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
                             <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
-                            <td class="py-4 px-6 text-sm"><?php echo h($product['brand'] ?: '-'); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h($product['category_name']); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
-                            <td class="py-4 px-6 text-sm"><?php echo (int)$product['current_stock']; ?></td>
+                            <td class="py-4 px-4 text-sm">
+                                <div class="flex gap-2">
+                                    <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline m-0">
+                                        <?php echo csrf_field(); ?>
+                                        <input type="hidden" name="product_id" value="<?php echo (int)$product['product_id']; ?>">
+                                        <input type="hidden" name="qty" value="1">
+                                        <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
+                                    </form>
+                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($product["product_name"])); ?>, <?php echo h(json_encode($product["specification"] ?? "")); ?>, <?php echo h(json_encode($product["compatibility"] ?? "")); ?>)' class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                </div>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if (empty($products)): ?>
-                        <tr><td colspan="7" class="py-8 text-center text-gray-500">No products found.</td></tr>
+                        <tr><td colspan="6" class="py-8 text-center text-gray-500">No products found.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Next Button -->
+        <div class="border-t border-black dark:border-black py-4 px-6 bg-white dark:bg-gray-900">
+            <button type="button" onclick="openCartModal()" class="border border-black dark:border-white px-10 py-2 text-sm font-bold uppercase tracking-wide hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 text-black dark:text-white">Next</button>
         </div>
     </div>
     
@@ -357,7 +369,7 @@ include '../includes/header.php';
             <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm); ?></h2>
         </div>
         <div class="py-3 px-6 border-b border-black dark:border-black">
-            <span class="font-bold text-sm tracking-wide"><?php echo count($flatRecommendations); ?> Featured-Based</span>
+            <span class="font-bold text-sm tracking-wide">Featured Based</span>
         </div>
         
         <div class="flex-1 overflow-auto">
@@ -385,7 +397,7 @@ include '../includes/header.php';
                                         <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                         <input type="hidden" name="qty" value="1">
                                         <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
-                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'])); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                     </form>
                                 </div>
                             </td>
@@ -397,42 +409,6 @@ include '../includes/header.php';
         </div>
     </div>
     <?php endif; ?>
-</div>
-
-<!-- Quantity Popup Modal -->
-<div id="qtyPopupModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-    <div class="w-[400px] bg-white dark:bg-gray-800 border border-black dark:border-black shadow-2xl flex flex-col">
-        <div class="border-b border-black dark:border-black py-4 px-6">
-            <h3 class="text-sm font-bold uppercase tracking-wider text-black dark:text-white" id="qtyPopupTitle">ADD TO CART</h3>
-        </div>
-        <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="qtyPopupForm">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="product_id" id="qtyPopupProductId">
-            <div class="p-6 space-y-4">
-                <div class="text-sm text-black dark:text-white">
-                    <span class="font-bold" id="qtyPopupName"></span>
-                    <span class="ml-2 text-gray-500" id="qtyPopupPrice"></span>
-                </div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Available Stock: <span id="qtyPopupStock"></span></div>
-                <div id="qtyPopupSpecs" class="hidden text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200 dark:border-gray-600 pt-3 space-y-1">
-                    <div id="qtyPopupSpecLine"></div>
-                    <div id="qtyPopupCompatLine"></div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium mb-2 text-black dark:text-white">Quantity</label>
-                    <div class="flex items-center gap-4">
-                        <button type="button" onclick="adjustQtyPopup(-1)" class="w-10 h-10 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white text-xl font-bold">-</button>
-                        <input type="number" name="qty" id="qtyPopupInput" min="1" value="1" class="w-20 text-center border border-black dark:border-black px-3 py-2 bg-transparent dark:bg-gray-700 dark:text-white focus:outline-none text-lg font-medium" required>
-                        <button type="button" onclick="adjustQtyPopup(1)" class="w-10 h-10 flex items-center justify-center border-2 border-black dark:border-black rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white text-xl font-bold">+</button>
-                    </div>
-                </div>
-            </div>
-            <div class="p-6 border-t border-black dark:border-black flex justify-end gap-4">
-                <button type="button" onclick="closeQtyPopup()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white">Cancel</button>
-                <button type="submit" name="add_to_cart" class="border-2 border-black dark:border-black rounded-md px-6 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white">Add to Cart</button>
-            </div>
-        </form>
-    </div>
 </div>
 
 <!-- Specs Modal -->
@@ -472,7 +448,7 @@ include '../includes/header.php';
                             <div class="text-sm mt-1">Price: &#8369;<?php echo number_format((float)$item['price'], 2); ?></div>
                         </div>
                         <div class="flex items-center gap-6 text-xl">
-                            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php?cart=1')); ?>" class="inline">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
                                 <input type="hidden" name="action" value="decrease">
@@ -481,7 +457,7 @@ include '../includes/header.php';
                                 </button>
                             </form>
                             <span class="w-4 text-center text-lg font-medium"><?php echo h((string)$item['qty']); ?></span>
-                            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
+                            <form method="POST" action="<?php echo h(app_url('pages/pos.php?cart=1')); ?>" class="inline">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="product_id" value="<?php echo h((string)$productId); ?>">
                                 <input type="hidden" name="action" value="increase">
@@ -602,49 +578,11 @@ include '../includes/header.php';
 </div>
 <script>
     const totalDue = <?php echo json_encode($totalDue); ?>;
-    var qtyPopupMaxStock = 1;
     
     function calculateChange() {
         const received = parseFloat(document.getElementById('amountReceived').value) || 0;
         const change = received - totalDue;
         document.getElementById('changeAmount').textContent = change > 0 ? change.toFixed(2) : "0.00";
-    }
-
-    function openQtyPopup(productId, productName, price, stock, specification, compatibility) {
-        document.getElementById('qtyPopupProductId').value = productId;
-        document.getElementById('qtyPopupName').textContent = productName;
-        document.getElementById('qtyPopupPrice').textContent = '₱' + price.toFixed(2);
-        document.getElementById('qtyPopupStock').textContent = stock;
-        document.getElementById('qtyPopupInput').value = 1;
-        document.getElementById('qtyPopupInput').max = stock;
-        qtyPopupMaxStock = stock;
-
-        // Show specs/compatibility if available
-        var specsSection = document.getElementById('qtyPopupSpecs');
-        var specLine = document.getElementById('qtyPopupSpecLine');
-        var compatLine = document.getElementById('qtyPopupCompatLine');
-        if ((specification && specification.trim()) || (compatibility && compatibility.trim())) {
-            specsSection.classList.remove('hidden');
-            specLine.innerHTML = specification ? '<span class="font-bold">Specifications:</span> ' + specification : '';
-            compatLine.innerHTML = compatibility ? '<span class="font-bold">Compatibility:</span> ' + compatibility : '';
-        } else {
-            specsSection.classList.add('hidden');
-        }
-
-        document.getElementById('qtyPopupModal').classList.remove('hidden');
-        document.getElementById('qtyPopupModal').classList.add('flex');
-        document.getElementById('qtyPopupInput').focus();
-    }
-
-    function closeQtyPopup() {
-        document.getElementById('qtyPopupModal').classList.add('hidden');
-        document.getElementById('qtyPopupModal').classList.remove('flex');
-    }
-
-    function adjustQtyPopup(delta) {
-        var input = document.getElementById('qtyPopupInput');
-        var newVal = Math.max(1, Math.min(qtyPopupMaxStock, (parseInt(input.value) || 1) + delta));
-        input.value = newVal;
     }
 
     function printReceipt() {
@@ -737,9 +675,11 @@ include '../includes/header.php';
         document.getElementById('pos-main-view').classList.add('flex');
     }
     
-    function openSpecsModal(name, compatibility) {
-        document.getElementById('specsCompatibility').innerHTML = `<li>${compatibility || 'N/A'}</li>`;
-        document.getElementById('specsDetails').innerHTML = `<li>Product: ${name}</li>`;
+    function openSpecsModal(name, specification, compatibility) {
+        var compatItems = (compatibility && compatibility.trim()) ? compatibility.split(',').map(c => '<li>' + c.trim() + '</li>').join('') : '<li>N/A</li>';
+        var specItems = (specification && specification.trim()) ? specification.split(',').map(s => '<li>' + s.trim() + '</li>').join('') : '<li>N/A</li>';
+        document.getElementById('specsCompatibility').innerHTML = compatItems;
+        document.getElementById('specsDetails').innerHTML = specItems;
         document.getElementById('specsModal').classList.remove('hidden');
         document.getElementById('specsModal').classList.add('flex');
     }
@@ -822,8 +762,8 @@ include '../includes/header.php';
             window.posInterceptorAttached = true;
             document.body.addEventListener('submit', async (e) => {
             const form = e.target;
-            // Let checkout view +/- qty forms submit natively (they POST and redirect back to ?checkout=1)
-            if (form.closest('#pos-checkout-view')) {
+            // Let checkout view and cart modal forms submit natively
+            if (form.closest('#pos-checkout-view') || form.closest('#cartModal')) {
                 return;
             }
             // Intercept standard POS operations (adding, updating, removing cart items)
@@ -874,7 +814,6 @@ include '../includes/header.php';
                 const isCartModalOpen = !document.getElementById('cartModal')?.classList.contains('hidden');
                 const isSpecsModalOpen = !document.getElementById('specsModal')?.classList.contains('hidden');
                 const isCheckoutViewOpen = !document.getElementById('pos-checkout-view')?.classList.contains('hidden');
-                const isQtyPopupOpen = !document.getElementById('qtyPopupModal')?.classList.contains('hidden');
                 
                 try {
                     const response = await fetch(fetchUrl, fetchOptions);
