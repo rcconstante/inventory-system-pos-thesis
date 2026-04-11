@@ -107,7 +107,7 @@ if ($transactionPage > $totalPages) {
 $transactionsStatement = $pdo->prepare(
     "SELECT s.sale_id, s.payment_method, s.total_amount, s.status, s.`date`, u.full_name AS cashier_name
      FROM Sale s
-     LEFT JOIN Users u ON s.user_id = u.user_id
+     LEFT JOIN User u ON s.user_id = u.user_id
      WHERE DATE(s.`date`) = CURDATE()
      ORDER BY s.`date` DESC, s.sale_id DESC
      LIMIT :limit OFFSET :offset"
