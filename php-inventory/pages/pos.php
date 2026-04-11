@@ -844,13 +844,6 @@ include '../includes/header.php';
 
                         document.body.innerHTML = doc.body.innerHTML;
 
-                        // Restore dark mode class (prevents flash/toggle bug)
-                        if (wasDarkMode) {
-                            document.documentElement.classList.add('dark');
-                        } else {
-                            document.documentElement.classList.remove('dark');
-                        }
-
                         // Re-apply preserved modal states
                         if (isCartModalOpen) {
                             document.getElementById('cartModal')?.classList.remove('hidden');
@@ -867,13 +860,21 @@ include '../includes/header.php';
                             document.getElementById('pos-main-view')?.classList.remove('flex');
                         }
 
-                        // Re-execute inline scripts so event handlers work after DOM replacement
-                        document.querySelectorAll('script').forEach(function(oldScript) {
+                        // Re-execute BODY scripts only (skip head scripts like Tailwind CDN to avoid re-init)
+                        document.body.querySelectorAll('script').forEach(function(oldScript) {
+                            if (oldScript.src) return; // skip external scripts
                             var newScript = document.createElement('script');
                             Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
                             newScript.appendChild(document.createTextNode(oldScript.innerHTML));
                             oldScript.parentNode.replaceChild(newScript, oldScript);
                         });
+
+                        // Restore dark mode AFTER script re-execution to ensure final state
+                        if (wasDarkMode) {
+                            document.documentElement.classList.add('dark');
+                        } else {
+                            document.documentElement.classList.remove('dark');
+                        }
 
                         // Restore scroll areas
                         const newScrollableLists = document.querySelectorAll('.overflow-auto');
