@@ -558,9 +558,9 @@ include '../includes/header.php';
 
     <!-- Bottom Section: Payment Method + Totals + Buttons -->
     <div class="border-t border-black dark:border-black px-8 py-6">
-        <div class="flex">
+        <div class="flex relative min-h-[120px]">
             <!-- Left: Payment Method (centered in its column) -->
-            <div class="flex-1 flex flex-col items-center text-center">
+            <div class="flex-1 flex flex-col items-center text-center pr-6">
                 <h3 class="text-sm font-bold uppercase mb-4 tracking-wide">SELECT PAYMENT METHOD</h3>
                 <div class="flex gap-4 mb-4">
                     <button type="button" id="btnCASH" onclick="setPaymentMethod('CASH')" class="border-2 border-black dark:border-white px-8 py-2 font-bold uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 tracking-wide text-sm">CASH</button>
@@ -573,11 +573,11 @@ include '../includes/header.php';
                 </div>
             </div>
 
-            <!-- Vertical Divider -->
-            <div class="self-stretch w-px bg-black dark:bg-white mx-6"></div>
+            <!-- Vertical Divider: absolutely positioned to span full section height -->
+            <div class="absolute top-0 bottom-0 w-px bg-black dark:bg-white" style="left:50%"></div>
 
             <!-- Right: Totals (left-aligned) -->
-            <div class="flex-1 text-left text-base font-medium space-y-2">
+            <div class="flex-1 text-left text-base font-medium space-y-2 pl-6">
                 <div>Total Amount: <?php echo number_format($totalDue, 2); ?></div>
                 <div class="flex items-center gap-2">
                     <span>Amount Received:</span>
