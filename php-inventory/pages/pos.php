@@ -514,25 +514,25 @@ include '../includes/header.php';
 
     <!-- Items Table -->
     <div class="flex-1 px-8 overflow-auto">
-        <table class="w-full text-sm border-collapse">
+        <table class="w-full text-sm border-collapse border border-black dark:border-white">
             <thead>
-                <tr class="border-b-2 border-black dark:border-white">
-                    <th class="text-left py-3 px-4 font-bold">PCODE</th>
-                    <th class="text-left py-3 px-4 font-bold">Product Name</th>
-                    <th class="text-left py-3 px-4 font-bold">Unit Price</th>
-                    <th class="text-center py-3 px-4 font-bold">Quantity</th>
-                    <th class="text-right py-3 px-4 font-bold">Total</th>
+                <tr>
+                    <th class="text-left py-3 px-4 font-bold border border-black dark:border-white">PCODE</th>
+                    <th class="text-left py-3 px-4 font-bold border border-black dark:border-white">Product Name</th>
+                    <th class="text-left py-3 px-4 font-bold border border-black dark:border-white">Unit Price</th>
+                    <th class="text-center py-3 px-4 font-bold border border-black dark:border-white">Quantity</th>
+                    <th class="text-right py-3 px-4 font-bold border border-black dark:border-white">Total</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($cart as $pid => $item):
                     $itemTotal = (float)$item['price'] * (int)$item['qty'];
                 ?>
-                <tr class="border-b border-gray-300 dark:border-gray-600">
-                    <td class="py-3 px-4">P<?php echo str_pad((string)$pid, 4, '0', STR_PAD_LEFT); ?></td>
-                    <td class="py-3 px-4"><?php echo h($item['name']); ?></td>
-                    <td class="py-3 px-4">&#8369;<?php echo number_format((float)$item['price'], 2); ?></td>
-                    <td class="py-3 px-4">
+                <tr>
+                    <td class="py-3 px-4 border border-black dark:border-white">P<?php echo str_pad((string)$pid, 4, '0', STR_PAD_LEFT); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white"><?php echo h($item['name']); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white">&#8369;<?php echo number_format((float)$item['price'], 2); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white">
                         <div class="flex items-center justify-center gap-2">
                             <form method="POST" action="<?php echo h(app_url('pages/pos.php?checkout=1')); ?>" class="inline m-0">
                                 <?php echo csrf_field(); ?>
@@ -549,7 +549,7 @@ include '../includes/header.php';
                             </form>
                         </div>
                     </td>
-                    <td class="py-3 px-4 text-right">&#8369;<?php echo number_format($itemTotal, 2); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white text-right">&#8369;<?php echo number_format($itemTotal, 2); ?></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -558,7 +558,7 @@ include '../includes/header.php';
 
     <!-- Bottom Section: Payment Method + Totals + Buttons -->
     <div class="border-t border-black dark:border-black px-8 py-6">
-        <div class="flex items-start">
+        <div class="flex">
             <!-- Left: Payment Method (centered in its column) -->
             <div class="flex-1 flex flex-col items-center text-center">
                 <h3 class="text-sm font-bold uppercase mb-4 tracking-wide">SELECT PAYMENT METHOD</h3>
@@ -822,6 +822,10 @@ include '../includes/header.php';
             window.posInterceptorAttached = true;
             document.body.addEventListener('submit', async (e) => {
             const form = e.target;
+            // Let checkout view +/- qty forms submit natively (they POST and redirect back to ?checkout=1)
+            if (form.closest('#pos-checkout-view')) {
+                return;
+            }
             // Intercept standard POS operations (adding, updating, removing cart items)
             if (form.closest('#pos-main-view') || form.closest('.w-\\[400px\\]') || document.querySelector('#pos-main-view')) {
                 const method = (form.method || 'GET').toUpperCase();
