@@ -213,6 +213,8 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
             p.product_name AS alternative_name,
             p.brand AS alternative_brand,
             p.price,
+            COALESCE(p.specification, '') AS specification,
+            COALESCE(p.compatibility, '') AS compatibility,
             COALESCE(i.current_stock, 0) AS alternative_stock
          FROM Feature_Based_Match fbm
          INNER JOIN Products p ON p.product_id = fbm.alternative_product_id

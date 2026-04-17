@@ -414,7 +414,7 @@ include '../includes/header.php';
                                         <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                         <input type="hidden" name="qty" value="1">
                                         <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
-                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['matched_attribute'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                     </form>
                                 </div>
                             </td>
@@ -594,11 +594,11 @@ include '../includes/header.php';
     </div>
 </div>
 <script>
-    const totalDue = <?php echo json_encode($totalDue); ?>;
+    var totalDue = <?php echo json_encode($totalDue); ?>;
     
     function calculateChange() {
-        const received = parseFloat(document.getElementById('amountReceived').value) || 0;
-        const change = received - totalDue;
+        var received = parseFloat(document.getElementById('amountReceived').value) || 0;
+        var change = received - totalDue;
         document.getElementById('changeAmount').textContent = change > 0 ? change.toFixed(2) : "0.00";
     }
 
@@ -884,13 +884,18 @@ include '../includes/header.php';
                             }
                         });
 
-                        // Restore focus
+                        // Restore focus and cursor position
                         let elToFocus = null;
                         if (activeId) elToFocus = document.getElementById(activeId);
                         else if (activeName) elToFocus = document.querySelector(`[name="${activeName}"]`);
                         
                         if (elToFocus) {
                             elToFocus.focus();
+                            // Restore cursor to end for text inputs (e.g. search box)
+                            if ((elToFocus.type === 'text' || elToFocus.type === 'search' || elToFocus.tagName === 'INPUT') && typeof elToFocus.setSelectionRange === 'function') {
+                                var len = elToFocus.value.length;
+                                elToFocus.setSelectionRange(len, len);
+                            }
                         }
                     } else {
                         form.submit();
