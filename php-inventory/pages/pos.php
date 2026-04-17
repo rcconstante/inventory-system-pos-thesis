@@ -791,153 +791,136 @@ include '../includes/header.php';
 <script>
     // AJAX Form Submission Interceptor for POS
     (function initPOS() {
-        // Add Live Search Functionality
-        const liveSearchInput = document.querySelector('input[name="q"]');
-        if (liveSearchInput) {
-            let debounceTimer;
-            liveSearchInput.addEventListener('input', (e) => {
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => {
-                    if (liveSearchInput.form) {
-                        liveSearchInput.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                    }
-                }, 300);
+        // Add Live Search Functionality (only once)
+        if (!window.posSearchAttached) {
+            window.posSearchAttached = true;
+            document.addEventListener('input', function(e) {
+                if (e.target && e.target.name === 'q' && e.target.closest('#pos-main-view')) {
+                    clearTimeout(window._posSearchTimer);
+                    window._posSearchTimer = setTimeout(function() {
+                        if (e.target.form) {
+                            e.target.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                        }
+                    }, 300);
+                }
             });
         }
 
         // Only attach global body listener ONCE
         if (!window.posInterceptorAttached) {
             window.posInterceptorAttached = true;
-            document.body.addEventListener('submit', async (e) => {
-            const form = e.target;
-            // Let checkout view and cart modal forms submit natively
-            if (form.closest('#pos-checkout-view') || form.closest('#cartModal')) {
-                return;
-            }
-            // Intercept standard POS operations (adding, updating, removing cart items)
-            if (form.closest('#pos-main-view') || form.closest('.w-\\[400px\\]') || document.querySelector('#pos-main-view')) {
-                const method = (form.method || 'GET').toUpperCase();
-                const submitter = e.submitter;
 
-                // Allow Checkout to proceed natively to enable redirect/receipt displays
-                if (submitter && submitter.name === 'checkout') {
+            function applyMorphdom(html, activeEl, wasDarkMode) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+
+                morphdom(document.body, doc.body, {
+                    onBeforeElUpdated: function(fromEl, toEl) {
+                        if (fromEl.id === 'cartModal' || fromEl.id === 'specsModal' ||
+                            fromEl.id === 'pos-checkout-view' || fromEl.id === 'pos-main-view' ||
+                            fromEl.id === 'notificationsModal' || fromEl.id === 'settingsModal') {
+                            toEl.className = fromEl.className;
+                        }
+                        if (fromEl === activeEl && (fromEl.tagName === 'INPUT' || fromEl.tagName === 'TEXTAREA')) {
+                            return false;
+                        }
+                        return true;
+                    }
+                });
+
+                // Re-execute inline scripts (dynamic PHP values like totalDue)
+                document.body.querySelectorAll('script').forEach(function(oldScript) {
+                    if (oldScript.src) return;
+                    var newScript = document.createElement('script');
+                    Array.from(oldScript.attributes).forEach(function(attr) { newScript.setAttribute(attr.name, attr.value); });
+                    newScript.appendChild(document.createTextNode(oldScript.innerHTML));
+                    oldScript.parentNode.replaceChild(newScript, oldScript);
+                });
+
+                if (wasDarkMode) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            }
+
+            document.body.addEventListener('submit', async function(e) {
+                var form = e.target;
+
+                // Only CONFIRM PAYMENT submits natively (needs redirect to receipt)
+                if (form.id === 'checkoutForm') {
+                    return;
+                }
+
+                if (!document.querySelector('#pos-main-view')) {
                     return;
                 }
 
                 e.preventDefault();
-                const formData = new FormData(form);
+
+                var method = (form.getAttribute('method') || 'GET').toUpperCase();
+                var submitter = e.submitter;
+                var formAction = form.getAttribute('action') || window.location.href;
+                var formData = new FormData(form);
                 if (submitter && submitter.name) {
                     formData.append(submitter.name, submitter.value);
                 }
 
-                let fetchUrl = form.action || window.location.href;
-                let fetchOptions = {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                };
+                var wasInCartModal = !!form.closest('#cartModal');
+                var wasInSpecsModal = !!form.closest('#specsModal');
+                var wasInCheckoutView = !!form.closest('#pos-checkout-view');
+                var wasDarkMode = document.documentElement.classList.contains('dark');
+                var activeEl = document.activeElement;
 
-                if (method === 'GET') {
-                    const url = new URL(fetchUrl, window.location.origin);
-                    for (const [key, value] of formData.entries()) {
-                        if (value) {
-                            url.searchParams.set(key, value);
-                        } else {
-                            url.searchParams.delete(key);
-                        }
-                    }
-                    fetchUrl = url.toString();
-                    window.history.pushState({}, '', fetchUrl);
-                    fetchOptions.method = 'GET';
-                } else {
-                    fetchOptions.method = 'POST';
-                    fetchOptions.body = formData;
-                }
-
-                // Save user state
-                const activeId = document.activeElement ? document.activeElement.id : null;
-                const activeName = document.activeElement ? document.activeElement.name : null;
-                const scrollableLists = document.querySelectorAll('.overflow-auto');
-                const scrollStates = Array.from(scrollableLists).map(el => el.scrollTop);
-
-                // Preserve UI visual states manually because AJAX resets DOM
-                const isCartModalOpen = !document.getElementById('cartModal')?.classList.contains('hidden');
-                const isSpecsModalOpen = !document.getElementById('specsModal')?.classList.contains('hidden');
-                const isCheckoutViewOpen = !document.getElementById('pos-checkout-view')?.classList.contains('hidden');
-                
                 try {
-                    const response = await fetch(fetchUrl, fetchOptions);
-                    if (response.ok) {
-                        const html = await response.text();
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-
-                        // Preserve dark mode class from <html> before body replacement
-                        const wasDarkMode = document.documentElement.classList.contains('dark');
-
-                        document.body.innerHTML = doc.body.innerHTML;
-
-                        // Re-apply preserved modal states
-                        if (isCartModalOpen) {
-                            document.getElementById('cartModal')?.classList.remove('hidden');
-                            document.getElementById('cartModal')?.classList.add('flex');
+                    if (method === 'GET') {
+                        // Search: build URL with params and fetch directly
+                        var url = new URL(formAction, window.location.origin);
+                        for (var pair of formData.entries()) {
+                            if (pair[1]) { url.searchParams.set(pair[0], pair[1]); }
+                            else { url.searchParams.delete(pair[0]); }
                         }
-                        if (isSpecsModalOpen) {
-                            document.getElementById('specsModal')?.classList.remove('hidden');
-                            document.getElementById('specsModal')?.classList.add('flex');
-                        }
-                        if (isCheckoutViewOpen) {
-                            document.getElementById('pos-checkout-view')?.classList.remove('hidden');
-                            document.getElementById('pos-checkout-view')?.classList.add('flex');
-                            document.getElementById('pos-main-view')?.classList.add('hidden');
-                            document.getElementById('pos-main-view')?.classList.remove('flex');
-                        }
+                        window.history.pushState({}, '', url.toString());
 
-                        // Re-execute BODY scripts only (skip head scripts like Tailwind CDN to avoid re-init)
-                        document.body.querySelectorAll('script').forEach(function(oldScript) {
-                            if (oldScript.src) return; // skip external scripts
-                            var newScript = document.createElement('script');
-                            Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-                            newScript.appendChild(document.createTextNode(oldScript.innerHTML));
-                            oldScript.parentNode.replaceChild(newScript, oldScript);
-                        });
-
-                        // Restore dark mode AFTER script re-execution to ensure final state
-                        if (wasDarkMode) {
-                            document.documentElement.classList.add('dark');
-                        } else {
-                            document.documentElement.classList.remove('dark');
-                        }
-
-                        // Restore scroll areas
-                        const newScrollableLists = document.querySelectorAll('.overflow-auto');
-                        newScrollableLists.forEach((el, index) => {
-                            if (scrollStates[index] !== undefined) {
-                                el.scrollTop = scrollStates[index];
-                            }
-                        });
-
-                        // Restore focus and cursor position
-                        let elToFocus = null;
-                        if (activeId) elToFocus = document.getElementById(activeId);
-                        else if (activeName) elToFocus = document.querySelector(`[name="${activeName}"]`);
-                        
-                        if (elToFocus) {
-                            elToFocus.focus();
-                            // Restore cursor to end for text inputs (e.g. search box)
-                            if ((elToFocus.type === 'text' || elToFocus.type === 'search' || elToFocus.tagName === 'INPUT') && typeof elToFocus.setSelectionRange === 'function') {
-                                var len = elToFocus.value.length;
-                                elToFocus.setSelectionRange(len, len);
-                            }
-                        }
+                        var resp = await fetch(url.toString());
+                        if (!resp.ok) { form.submit(); return; }
+                        applyMorphdom(await resp.text(), activeEl, wasDarkMode);
                     } else {
-                        form.submit();
+                        // POST: send the action with redirect:manual so the flash message
+                        // stays in session (redirect:follow would consume it silently)
+                        await fetch(formAction, {
+                            method: 'POST',
+                            body: formData,
+                            redirect: 'manual'
+                        });
+
+                        // Now GET the current page to get the updated state
+                        var pageUrl = window.location.href;
+                        var pageResp = await fetch(pageUrl);
+                        if (!pageResp.ok) { window.location.reload(); return; }
+                        applyMorphdom(await pageResp.text(), activeEl, wasDarkMode);
+
+                        // Post-update: keep modals/views in their current state
+                        if (wasInSpecsModal) {
+                            closeSpecsModal();
+                        }
+                        if (wasInCheckoutView) {
+                            var cv = document.getElementById('pos-checkout-view');
+                            var mv = document.getElementById('pos-main-view');
+                            if (cv) { cv.classList.remove('hidden'); cv.classList.add('flex'); }
+                            if (mv) { mv.classList.add('hidden'); mv.classList.remove('flex'); }
+                        }
+                        if (wasInCartModal) {
+                            var cm = document.getElementById('cartModal');
+                            if (cm) { cm.classList.remove('hidden'); cm.classList.add('flex'); }
+                        }
                     }
-                } catch (error) {
-                    console.error('AJAX Intercept failed:', error);
-                    form.submit();
+                } catch (err) {
+                    console.error('POS AJAX error:', err);
+                    window.location.reload();
                 }
-            }
-        });
-        } // End of window.posInterceptorAttached check
+            });
+        }
     })();
 </script>
 
