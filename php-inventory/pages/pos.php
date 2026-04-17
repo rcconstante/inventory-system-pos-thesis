@@ -252,10 +252,27 @@ foreach ($productParameters as $parameter => $value) {
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
 
-// Only fetch recommendations when a search term is provided
+// Show recommendations ONLY when a search returns zero in-stock results
+$showRecommendations = ($searchTerm !== '' && empty($products) && recommendations_enabled());
+
 $recommendations = [];
-if ($searchTerm !== '' && recommendations_enabled()) {
-    $recommendations = fetch_recommendations_for_products($pdo, array_map(static fn (array $product): int => (int) $product['product_id'], $products));
+if ($showRecommendations) {
+    // Search ALL products (including out-of-stock) matching the search term
+    $oosQuery = "
+        SELECT p.product_id
+        FROM Products p
+        WHERE (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3)
+    ";
+    $oosStmt = $pdo->prepare($oosQuery);
+    $oosStmt->bindValue(':st1', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $oosStmt->bindValue(':st2', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $oosStmt->bindValue(':st3', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $oosStmt->execute();
+    $oosIds = array_map('intval', $oosStmt->fetchAll(PDO::FETCH_COLUMN));
+
+    if (!empty($oosIds)) {
+        $recommendations = fetch_recommendations_for_products($pdo, $oosIds);
+    }
 }
 
 $flatRecommendations = [];
@@ -362,8 +379,8 @@ include '../includes/header.php';
         </div>
     </div>
     
-    <!-- Right side: Recommendations (only shown when searching) -->
-    <?php if ($searchTerm !== ''): ?>
+    <!-- Right side: Recommendations (only shown when searched product is out of stock) -->
+    <?php if ($showRecommendations && !empty($flatRecommendations)): ?>
     <div class="w-[450px] flex flex-col bg-white dark:bg-gray-900 flex-shrink-0">
         <div class="p-6 border-b border-black dark:border-black">
             <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm); ?></h2>
