@@ -334,7 +334,15 @@ include '../includes/header.php';
         
         <!-- Table -->
         <div class="flex-1 overflow-auto bg-white dark:bg-gray-900 pb-4">
-            <table class="w-full text-left border-collapse">
+            <table class="w-full text-left border-collapse table-fixed">
+                <colgroup>
+                    <col style="width:5%">
+                    <col style="width:10%">
+                    <col style="width:35%">
+                    <col style="width:22%">
+                    <col style="width:10%">
+                    <col style="width:18%">
+                </colgroup>
                 <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
                     <tr>
                         <th class="py-4 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">NO.</th>
@@ -350,8 +358,8 @@ include '../includes/header.php';
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                             <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
                             <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                            <td class="py-4 px-6 text-sm"><?php echo h($product['product_name']); ?></td>
-                            <td class="py-4 px-6 text-sm"><?php echo h($product['category_name']); ?></td>
+                            <td class="py-4 px-6 text-sm truncate"><?php echo h($product['product_name']); ?></td>
+                            <td class="py-4 px-6 text-sm truncate"><?php echo h($product['category_name']); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
                             <td class="py-4 px-4 text-sm">
                                 <div class="flex gap-2">
@@ -361,7 +369,7 @@ include '../includes/header.php';
                                         <input type="hidden" name="qty" value="1">
                                         <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
                                     </form>
-                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($product["product_name"])); ?>, <?php echo h(json_encode($product["specification"] ?? "")); ?>, <?php echo h(json_encode($product["compatibility"] ?? "")); ?>)' class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($product["product_name"])); ?>, <?php echo h(json_encode($product["specification"] ?? "")); ?>, <?php echo h(json_encode($product["compatibility"] ?? "")); ?>, <?php echo (int)$product["product_id"]; ?>)' class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                 </div>
                             </td>
                         </tr>
@@ -390,7 +398,12 @@ include '../includes/header.php';
         </div>
         
         <div class="flex-1 overflow-auto">
-            <table class="w-full text-left border-collapse">
+            <table class="w-full text-left border-collapse table-fixed">
+                <colgroup>
+                    <col style="width:45%">
+                    <col style="width:20%">
+                    <col style="width:35%">
+                </colgroup>
                 <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
                     <tr>
                         <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
@@ -404,8 +417,8 @@ include '../includes/header.php';
                     <?php else: ?>
                         <?php foreach (array_slice($flatRecommendations, 0, 10) as $rec): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
-                            <td class="py-4 px-6 text-sm"><?php echo h($rec['alternative_name']); ?></td>
-                            <td class="py-4 px-6 text-sm"><?php echo h($rec['alternative_brand'] ?? 'N/A'); ?></td>
+                            <td class="py-4 px-6 text-sm truncate"><?php echo h($rec['alternative_name']); ?></td>
+                            <td class="py-4 px-6 text-sm truncate"><?php echo h($rec['alternative_brand'] ?? 'N/A'); ?></td>
                             <td class="py-4 px-6 text-sm">
                                 <div class="flex items-center justify-between gap-4">
                                     <span><?php echo h((string)round((float)($rec['price'] ?? 0))); ?></span>
@@ -414,7 +427,7 @@ include '../includes/header.php';
                                         <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                         <input type="hidden" name="qty" value="1">
                                         <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
-                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>')" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>', <?php echo (int)$rec['alternative_id']; ?>)" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                     </form>
                                 </div>
                             </td>
@@ -442,7 +455,12 @@ include '../includes/header.php';
             </ul>
         </div>
         <div class="p-6 border-t border-black dark:border-black flex justify-center gap-6">
-            <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add & Return POS</button>
+            <form id="specsAddForm" method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" id="specsProductId" name="product_id" value="">
+                <input type="hidden" name="qty" value="1">
+                <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Add & Return POS</button>
+            </form>
             <button type="button" onclick="closeSpecsModal()" class="border border-black dark:border-black rounded-md px-6 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-transparent text-black dark:text-white">Back</button>
         </div>
     </div>
@@ -507,7 +525,14 @@ include '../includes/header.php';
 
     <!-- Items Table -->
     <div class="flex-1 px-8 overflow-auto">
-        <table class="w-full text-sm border-collapse border border-black dark:border-white">
+        <table class="w-full text-sm border-collapse border border-black dark:border-white table-fixed">
+            <colgroup>
+                <col style="width:12%">
+                <col style="width:38%">
+                <col style="width:15%">
+                <col style="width:20%">
+                <col style="width:15%">
+            </colgroup>
             <thead>
                 <tr>
                     <th class="text-left py-3 px-4 font-bold border border-black dark:border-white">PCODE</th>
@@ -523,7 +548,7 @@ include '../includes/header.php';
                 ?>
                 <tr>
                     <td class="py-3 px-4 border border-black dark:border-white">P<?php echo str_pad((string)$pid, 4, '0', STR_PAD_LEFT); ?></td>
-                    <td class="py-3 px-4 border border-black dark:border-white"><?php echo h($item['name']); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white truncate"><?php echo h($item['name']); ?></td>
                     <td class="py-3 px-4 border border-black dark:border-white">&#8369;<?php echo number_format((float)$item['price'], 2); ?></td>
                     <td class="py-3 px-4 border border-black dark:border-white">
                         <div class="flex items-center justify-center gap-2">
@@ -692,11 +717,12 @@ include '../includes/header.php';
         document.getElementById('pos-main-view').classList.add('flex');
     }
     
-    function openSpecsModal(name, specification, compatibility) {
+    function openSpecsModal(name, specification, compatibility, productId) {
         var compatItems = (compatibility && compatibility.trim()) ? compatibility.split(',').map(c => '<li>' + c.trim() + '</li>').join('') : '<li>N/A</li>';
         var specItems = (specification && specification.trim()) ? specification.split(',').map(s => '<li>' + s.trim() + '</li>').join('') : '<li>N/A</li>';
         document.getElementById('specsCompatibility').innerHTML = compatItems;
         document.getElementById('specsDetails').innerHTML = specItems;
+        document.getElementById('specsProductId').value = productId || '';
         document.getElementById('specsModal').classList.remove('hidden');
         document.getElementById('specsModal').classList.add('flex');
     }
@@ -725,10 +751,15 @@ include '../includes/header.php';
         </div>
         
         <div class="p-8 flex-1 overflow-auto max-h-[40vh]">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm table-fixed">
+                <colgroup>
+                    <col style="width:15%">
+                    <col style="width:60%">
+                    <col style="width:25%">
+                </colgroup>
                 <thead>
                     <tr class="text-left font-bold border-b border-black dark:border-gray-600">
-                        <th class="pb-3 w-16">QTY</th>
+                        <th class="pb-3">QTY</th>
                         <th class="pb-3">DESCRIPTION</th>
                         <th class="pb-3 text-right">AMOUNT</th>
                     </tr>
