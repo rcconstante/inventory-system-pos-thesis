@@ -148,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'product_id' => $productId,
                 ]);
 
-                $inventoryStatement = $pdo->prepare('SELECT inventory_id FROM Inventory WHERE product_id = :product_id LIMIT 1');
+                $inventoryStatement = $pdo->prepare('SELECT inventory_id, current_stock FROM Inventory WHERE product_id = :product_id LIMIT 1');
                 $inventoryStatement->execute(['product_id' => $productId]);
                 $inventoryRow = $inventoryStatement->fetch(PDO::FETCH_ASSOC);
 
@@ -163,6 +163,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'expiry_date' => $expiryDate,
                         'product_id' => $productId,
                     ]);
+
+                    // Adjust stock if quantity changed via edit
+                    $existingStock = (int) ($inventoryRow['current_stock'] ?? 0);
+                    if ($currentStock !== $existingStock) {
+                        $diff = $currentStock - $existingStock;
+                        if ($diff > 0) {
+                            create_stock_batch($pdo, $productId, $diff, $acquisitionCost, $manufacturingDate, $expiryDate);
+                        } else {
+                            $decreaseRemaining = abs($diff);
+                            $batchesForDecrease = $pdo->prepare(
+                                "SELECT batch_id, quantity_remaining FROM Stock_Batch
+                                 WHERE product_id = :pid AND is_depleted = 0 AND status = 'ACTIVE'
+                                 ORDER BY date_received DESC, batch_id DESC"
+                            );
+                            $batchesForDecrease->execute(['pid' => $productId]);
+                            foreach ($batchesForDecrease->fetchAll(PDO::FETCH_ASSOC) as $batch) {
+                                if ($decreaseRemaining <= 0) break;
+                                $batchQty = (int) $batch['quantity_remaining'];
+                                $take = min($decreaseRemaining, $batchQty);
+                                $newQty = $batchQty - $take;
+                                $pdo->prepare(
+                                    'UPDATE Stock_Batch SET quantity_remaining = :qty, is_depleted = CASE WHEN :qty2 <= 0 THEN 1 ELSE 0 END WHERE batch_id = :bid'
+                                )->execute(['qty' => $newQty, 'qty2' => $newQty, 'bid' => $batch['batch_id']]);
+                                $decreaseRemaining -= $take;
+                            }
+                            sync_inventory_from_batches($pdo, $productId);
+                        }
+                    }
                 } else {
                     $insertInventory = $pdo->prepare(
                         'INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date)
@@ -310,10 +338,10 @@ $countStmt->execute();
 $totalProducts = (int) $countStmt->fetchColumn();
 
 $perPage = 10;
-$currentPage = max(1, (int) ($_GET['page'] ?? 1));
+$paginationPage = max(1, (int) ($_GET['page'] ?? 1));
 $totalPages = max(1, (int) ceil($totalProducts / $perPage));
-if ($currentPage > $totalPages) { $currentPage = $totalPages; }
-$offset = ($currentPage - 1) * $perPage;
+if ($paginationPage > $totalPages) { $paginationPage = $totalPages; }
+$offset = ($paginationPage - 1) * $perPage;
 
 $productsQuery = "
     SELECT
@@ -412,7 +440,7 @@ try {
             }, $batches),
             'recommendations' => array_map(function($r) {
                 return ['name' => $r['alternative_name'], 'brand' => $r['alternative_brand'] ?? '', 'price' => (float)$r['price'], 'score' => (float)$r['similarity_score']];
-            }, array_slice($recs, 0, 5)),
+            }, $recs),
             'can_manage' => $canManage,
         ];
     }, $products), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
@@ -450,8 +478,12 @@ include '../includes/header.php';
     <?php endif; ?>
 </div>
 
-<div class="overflow-x-auto bg-white dark:bg-gray-800 mb-4">
-    <table class="w-full border-collapse border border-black dark:border-gray-600 text-sm">
+<div id="productsTableContainer" class="relative" data-products='<?php echo $productDataJson; ?>'>
+    <div id="productsTableLoading" class="hidden absolute inset-0 bg-white/80 dark:bg-gray-900/80 flex items-center justify-center z-10 backdrop-blur-sm">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-black dark:border-white"></div>
+    </div>
+    <div class="overflow-x-auto bg-white dark:bg-gray-800 mb-4">
+        <table class="w-full border-collapse border border-black dark:border-gray-600 text-sm">
         <thead>
             <tr class="text-sm font-bold uppercase text-gray-700 dark:text-gray-300">
                 <th class="border border-black dark:border-gray-600 p-4 w-[100px] text-center">PRODUCT ID</th>
@@ -552,21 +584,22 @@ include '../includes/header.php';
     if ($selectedCategoryId > 0) { $paginationParams['category_id'] = $selectedCategoryId; }
     if ($searchTerm !== '') { $paginationParams['search'] = $searchTerm; }
     ?>
-    <?php if ((int)$currentPage > 1): ?>
-        <?php $paginationParams['page'] = (int)$currentPage - 1; ?>
-        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Previous</a>
+    <?php if ((int)$paginationPage > 1): ?>
+        <?php $paginationParams['page'] = (int)$paginationPage - 1; ?>
+        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm active:scale-95 transition-transform duration-100">Previous</a>
     <?php else: ?>
         <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Previous</button>
     <?php endif; ?>
 
-    <span class="flex items-center text-sm text-gray-600 dark:text-gray-400">Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></span>
+    <span class="flex items-center text-sm text-gray-600 dark:text-gray-400">Page <?php echo $paginationPage; ?> of <?php echo $totalPages; ?></span>
 
-    <?php if ((int)$currentPage < (int)$totalPages): ?>
-        <?php $paginationParams['page'] = (int)$currentPage + 1; ?>
-        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">Next</a>
+    <?php if ((int)$paginationPage < (int)$totalPages): ?>
+        <?php $paginationParams['page'] = (int)$paginationPage + 1; ?>
+        <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm active:scale-95 transition-transform duration-100">Next</a>
     <?php else: ?>
         <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed text-sm">Next</button>
     <?php endif; ?>
+</div>
 </div>
 
 <?php if ($canManage): ?>
@@ -811,8 +844,14 @@ include '../includes/header.php';
         toggleProductModal('deleteProductModal', true);
     }
 
-    // ─── Product Data (pre-computed in PHP before HTML output to avoid script corruption) ───
-    var productData = <?php echo $productDataJson; ?>;
+    // ─── Product Data (read from container data attribute) ───
+    var productData = (function() {
+        var el = document.getElementById('productsTableContainer');
+        if (!el) return [];
+        var raw = el.getAttribute('data-products');
+        if (!raw) return [];
+        try { return JSON.parse(raw); } catch(e) { return []; }
+    })();
 
     // ─── Product Detail Modal ───
     function openProductDetailModal(productId) {
@@ -956,6 +995,56 @@ include '../includes/header.php';
         document.getElementById('deleteBatchName').textContent = batchNumber;
         toggleProductModal('deleteBatchModal', true);
     }
+
+    // Smooth pagination — Next/Previous without full page reload
+    (function() {
+        var container = document.getElementById('productsTableContainer');
+        if (!container) return;
+
+        document.addEventListener('click', function(e) {
+            var link = e.target.closest('a[href^="?"]');
+            if (!link || !container.contains(link)) return;
+            if (!link.textContent.match(/Previous|Next/)) return;
+            e.preventDefault();
+
+            var loading = document.getElementById('productsTableLoading');
+            if (loading) loading.classList.remove('hidden');
+
+            var url = link.href;
+
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(function(html) {
+                    var doc = (new DOMParser()).parseFromString(html, 'text/html');
+                    var newContainer = doc.getElementById('productsTableContainer');
+                    if (!newContainer) {
+                        window.location.href = url;
+                        return;
+                    }
+
+                    container.innerHTML = newContainer.innerHTML;
+                    history.pushState({}, '', url);
+
+                    // Re-extract productData from data-products attribute
+                    var raw = newContainer.getAttribute('data-products');
+                    if (raw) {
+                        try { window.productData = JSON.parse(raw); } catch(e) {}
+                    }
+
+                    window.scrollTo({ top: container.offsetTop - 20, behavior: 'smooth' });
+                })
+                .catch(function() {
+                    window.location.href = url;
+                });
+        });
+
+        window.addEventListener('popstate', function() {
+            window.location.reload();
+        });
+    })();
 </script>
 
 <?php include '../includes/footer.php'; ?>

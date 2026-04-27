@@ -28,16 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $productStatement = $pdo->prepare(
-                'SELECT
-                    p.product_id,
-                    p.product_name,
-                    p.brand,
-                    p.price,
-                    COALESCE(i.current_stock, 0) AS current_stock
-                 FROM Products p
-                 LEFT JOIN Inventory i ON i.product_id = p.product_id
-                 WHERE p.product_id = :product_id
-                 LIMIT 1'
+                'SELECT p.product_id, p.product_name, p.brand, p.price FROM Products p WHERE p.product_id = :product_id LIMIT 1'
             );
             $productStatement->execute(['product_id' => $productId]);
             $product = $productStatement->fetch(PDO::FETCH_ASSOC);
@@ -46,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('The selected product was not found.');
             }
 
-            $availableStock = (int) $product['current_stock'];
+            $availableStock = get_sellable_stock($pdo, $productId);
             if ($availableStock <= 0) {
                 throw new RuntimeException('That product is currently out of stock.');
             }
@@ -55,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $requestedTotalQuantity = $existingQuantity + $quantity;
 
             if ($requestedTotalQuantity > $availableStock) {
-                throw new RuntimeException('Requested quantity exceeds available stock.');
+                throw new RuntimeException('Requested quantity exceeds available stock (only ' . $availableStock . ' sellable units remain).');
             }
 
             $_SESSION['cart'][$productId] = [
@@ -72,10 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (isset($_SESSION['cart'][$productId])) {
                 if ($action === 'increase') {
-                    $productStatement = $pdo->prepare('SELECT COALESCE(i.current_stock, 0) FROM Inventory i WHERE i.product_id = :product_id LIMIT 1');
-                    $productStatement->execute(['product_id' => $productId]);
-                    $stock = (int) ($productStatement->fetchColumn() ?: 0);
-                    
+                    $stock = get_sellable_stock($pdo, $productId);
                     if ($_SESSION['cart'][$productId]['qty'] < $stock) {
                         $_SESSION['cart'][$productId]['qty']++;
                     } else {
@@ -116,15 +104,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $validatedItems = [];
             $totalAmount = 0.0;
 
-            $inventoryStatement = $pdo->prepare(
-                'SELECT
-                    p.product_name,
-                    p.price,
-                    COALESCE(i.current_stock, 0) AS current_stock
-                 FROM Products p
-                 LEFT JOIN Inventory i ON i.product_id = p.product_id
-                 WHERE p.product_id = :product_id
-                 FOR UPDATE'
+            $productStatement = $pdo->prepare(
+                'SELECT p.product_name, p.price FROM Products p WHERE p.product_id = :product_id FOR UPDATE'
             );
 
             foreach ($_SESSION['cart'] as $productId => $item) {
@@ -133,25 +114,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Cart contains an invalid quantity.');
                 }
 
-                $inventoryStatement->execute(['product_id' => (int) $productId]);
-                $inventoryRow = $inventoryStatement->fetch(PDO::FETCH_ASSOC);
+                $productStatement->execute(['product_id' => (int) $productId]);
+                $productRow = $productStatement->fetch(PDO::FETCH_ASSOC);
 
-                if (!$inventoryRow) {
+                if (!$productRow) {
                     throw new RuntimeException('A cart item is no longer available.');
                 }
 
-                $availableStock = (int) $inventoryRow['current_stock'];
+                $availableStock = get_sellable_stock($pdo, (int) $productId);
                 if ($quantity > $availableStock) {
-                    throw new RuntimeException('Insufficient stock for ' . $inventoryRow['product_name'] . '.');
+                    throw new RuntimeException('Insufficient stock for ' . $productRow['product_name'] . ' (only ' . $availableStock . ' sellable units remain).');
                 }
 
-                $price = (float) $inventoryRow['price'];
+                $price = (float) $productRow['price'];
                 $subtotal = $price * $quantity;
                 $totalAmount += $subtotal;
 
                 $validatedItems[] = [
                     'product_id' => (int) $productId,
-                    'product_name' => $inventoryRow['product_name'],
+                    'product_name' => $productRow['product_name'],
                     'quantity' => $quantity,
                     'price' => $price,
                     'subtotal' => $subtotal,
@@ -252,33 +233,40 @@ foreach ($productParameters as $parameter => $value) {
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
 
-// Show recommendations ONLY when a search returns zero in-stock results
-$showRecommendations = ($searchTerm !== '' && empty($products) && recommendations_enabled());
+// Show recommendations when search is specific and results are limited (≤ 3 in-stock matches)
+$showRecommendations = ($searchTerm !== '' && count($products) <= 3 && recommendations_enabled());
 
 $recommendations = [];
 if ($showRecommendations) {
-    // Search ALL products (including out-of-stock) matching the search term
-    $oosQuery = "
+    // Search ALL products matching the search term (including out-of-stock) to find sources for recommendations
+    $searchAllQuery = "
         SELECT p.product_id
         FROM Products p
         WHERE (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3)
     ";
-    $oosStmt = $pdo->prepare($oosQuery);
-    $oosStmt->bindValue(':st1', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $oosStmt->bindValue(':st2', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $oosStmt->bindValue(':st3', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $oosStmt->execute();
-    $oosIds = array_map('intval', $oosStmt->fetchAll(PDO::FETCH_COLUMN));
+    $searchAllStmt = $pdo->prepare($searchAllQuery);
+    $searchAllStmt->bindValue(':st1', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $searchAllStmt->bindValue(':st2', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $searchAllStmt->bindValue(':st3', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $searchAllStmt->execute();
+    $sourceIds = array_map('intval', $searchAllStmt->fetchAll(PDO::FETCH_COLUMN));
 
-    if (!empty($oosIds)) {
-        $recommendations = fetch_recommendations_for_products($pdo, $oosIds);
+    if (!empty($sourceIds)) {
+        $recommendations = fetch_recommendations_for_products($pdo, $sourceIds);
     }
 }
+
+// Build a set of product IDs already visible in the main list (so we don't recommend duplicates)
+$inStockProductIds = array_flip(array_map('intval', array_column($products, 'product_id')));
 
 $flatRecommendations = [];
 foreach ($recommendations as $recList) {
     foreach ($recList as $rec) {
         $altId = (int) $rec['alternative_id'];
+        // Skip if this alternative is already in the main in-stock product list
+        if (isset($inStockProductIds[$altId])) {
+            continue;
+        }
         // Keep only the highest similarity_score when the same alternative appears for multiple source products
         if (!isset($flatRecommendations[$altId]) || (float) $rec['similarity_score'] > (float) $flatRecommendations[$altId]['similarity_score']) {
             $flatRecommendations[$altId] = $rec;
@@ -381,15 +369,19 @@ include '../includes/header.php';
             </table>
         </div>
 
-        <!-- Next Button -->
-        <div class="border-t border-black dark:border-black py-4 px-6 bg-white dark:bg-gray-900">
-            <button type="button" onclick="openCartModal()" class="border border-black dark:border-white px-10 py-2 text-sm font-bold uppercase tracking-wide hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-800 text-black dark:text-white">Next</button>
+        <!-- Cart Button -->
+        <div class="border-t border-black dark:border-black py-4 px-6 bg-white dark:bg-gray-900 flex items-center justify-between">
+            <button type="button" onclick="openCartModal()" class="border border-black dark:border-white px-10 py-2 text-sm font-bold uppercase tracking-wide hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors active:scale-95 transition-transform duration-100 bg-white dark:bg-gray-800 text-black dark:text-white">
+                Next<?php if (!empty($cart)): ?> (<?php echo array_sum(array_column($cart, 'qty')); ?>)<?php endif; ?>
+            </button>
+            <span class="text-sm text-gray-500 dark:text-gray-400"><?php echo count($products); ?> product(s) in stock</span>
         </div>
     </div>
     
-    <!-- Right side: Recommendations (only shown when searched product is out of stock) -->
+    <!-- Right side: Recommendations -->
     <?php if ($showRecommendations && !empty($flatRecommendations)): ?>
-    <div class="w-[450px] flex flex-col bg-white dark:bg-gray-900 flex-shrink-0">
+    <div id="recResizer" class="w-1 bg-gray-200 dark:bg-gray-700 cursor-col-resize hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors flex-shrink-0 relative z-10" title="Drag to resize"></div>
+    <div id="recPanel" class="flex flex-col bg-white dark:bg-gray-900 flex-shrink-0" style="width:450px;">
         <div class="p-6 border-b border-black dark:border-black">
             <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm); ?></h2>
         </div>
@@ -400,36 +392,36 @@ include '../includes/header.php';
         <div class="flex-1 overflow-auto">
             <table class="w-full text-left border-collapse table-fixed">
                 <colgroup>
-                    <col style="width:45%">
-                    <col style="width:20%">
-                    <col style="width:35%">
+                    <col style="width:38%">
+                    <col style="width:18%">
+                    <col style="width:14%">
+                    <col style="width:30%">
                 </colgroup>
                 <thead class="sticky top-0 bg-white dark:bg-gray-800 border-b border-black dark:border-black z-10">
                     <tr>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRODUCT NAME</th>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">BRAND</th>
-                        <th class="py-3 px-6 text-sm font-bold uppercase tracking-wider border-b border-black dark:border-black">PRICE</th>
+                        <th class="py-3 px-4 text-xs font-bold uppercase tracking-wider border-b border-black dark:border-black">Product Name</th>
+                        <th class="py-3 px-4 text-xs font-bold uppercase tracking-wider border-b border-black dark:border-black">Brand</th>
+                        <th class="py-3 px-4 text-xs font-bold uppercase tracking-wider border-b border-black dark:border-black text-right">Price</th>
+                        <th class="py-3 px-4 text-xs font-bold uppercase tracking-wider border-b border-black dark:border-black text-center">Action</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-black dark:divide-black">
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                     <?php if (empty($flatRecommendations)): ?>
-                        <tr><td colspan="3" class="py-8 text-center text-gray-500">No recommendations available</td></tr>
+                        <tr><td colspan="4" class="py-8 text-center text-sm text-gray-500">No recommendations available</td></tr>
                     <?php else: ?>
-                        <?php foreach (array_slice($flatRecommendations, 0, 10) as $rec): ?>
+                        <?php foreach ($flatRecommendations as $rec): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
-                            <td class="py-4 px-6 text-sm truncate"><?php echo h($rec['alternative_name']); ?></td>
-                            <td class="py-4 px-6 text-sm truncate"><?php echo h($rec['alternative_brand'] ?? 'N/A'); ?></td>
-                            <td class="py-4 px-6 text-sm">
-                                <div class="flex items-center justify-between gap-4">
-                                    <span><?php echo h((string)round((float)($rec['price'] ?? 0))); ?></span>
-                                    <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="flex gap-2">
-                                        <?php echo csrf_field(); ?>
-                                        <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
-                                        <input type="hidden" name="qty" value="1">
-                                        <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
-                                        <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>', <?php echo (int)$rec['alternative_id']; ?>)" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
-                                    </form>
-                                </div>
+                            <td class="py-3 px-4 text-sm truncate" title="<?php echo h($rec['alternative_name']); ?>"><?php echo h($rec['alternative_name']); ?></td>
+                            <td class="py-3 px-4 text-sm truncate" title="<?php echo h($rec['alternative_brand'] ?? ''); ?>"><?php echo h($rec['alternative_brand'] ?: 'N/A'); ?></td>
+                            <td class="py-3 px-4 text-sm text-right font-medium">&#8369;<?php echo h(number_format((float)($rec['price'] ?? 0), 0)); ?></td>
+                            <td class="py-3 px-4 text-sm text-center">
+                                <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline-flex items-center gap-1">
+                                    <?php echo csrf_field(); ?>
+                                    <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
+                                    <input type="hidden" name="qty" value="1">
+                                    <button type="submit" name="add_to_cart" class="border border-black dark:border-gray-600 rounded px-2 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white whitespace-nowrap">Add</button>
+                                    <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>', <?php echo (int)$rec['alternative_id']; ?>)" class="border border-black dark:border-gray-600 rounded px-2 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white whitespace-nowrap">View</button>
+                                </form>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -440,6 +432,41 @@ include '../includes/header.php';
     </div>
     <?php endif; ?>
 </div>
+
+<script>
+    // Draggable recommendation panel resize
+    (function() {
+        var resizer = document.getElementById('recResizer');
+        var panel = document.getElementById('recPanel');
+        if (!resizer || !panel) return;
+
+        var startX, startW;
+
+        resizer.addEventListener('mousedown', function(e) {
+            startX = e.clientX;
+            startW = panel.offsetWidth;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+
+        function onMove(e) {
+            var dx = startX - e.clientX;
+            var newW = startW + dx;
+            if (newW < 280) newW = 280;
+            if (newW > 700) newW = 700;
+            panel.style.width = newW + 'px';
+        }
+
+        function onUp() {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        }
+    })();
+</script>
 
 <!-- Specs Modal -->
 <div id="specsModal" class="hidden fixed inset-0 z-[70] items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
@@ -599,7 +626,8 @@ include '../includes/header.php';
                 <div>Total Amount: <?php echo number_format($totalDue, 2); ?></div>
                 <div class="flex items-center gap-2">
                     <span>Amount Received:</span>
-                    <input type="number" id="amountReceived" class="border border-black dark:border-white px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()">
+                    <input type="number" id="amountReceived" class="border border-black dark:border-white px-3 py-1 w-32 bg-transparent focus:outline-none" onkeyup="calculateChange()" oninput="hideAmountError()">
+                    <p id="amountReceivedError" class="text-red-500 text-xs mt-1 hidden"></p>
                 </div>
                 <div>Change: <span id="changeAmount">0.00</span></div>
             </div>
@@ -669,8 +697,28 @@ include '../includes/header.php';
         }
     }
 
+    function hideAmountError() {
+        var errEl = document.getElementById('amountReceivedError');
+        if (errEl) errEl.classList.add('hidden');
+    }
+
     function validateCheckout() {
         var method = document.getElementById('selectedPaymentMethod').value;
+
+        // Validate sufficient payment for CASH
+        if (method === 'CASH') {
+            var received = parseFloat(document.getElementById('amountReceived').value) || 0;
+            if (received < totalDue) {
+                var errEl = document.getElementById('amountReceivedError');
+                if (errEl) {
+                    errEl.textContent = 'Insufficient amount. Please enter at least \u20B1' + totalDue.toFixed(2);
+                    errEl.classList.remove('hidden');
+                }
+                document.getElementById('amountReceived').focus();
+                return false;
+            }
+        }
+
         if (method === 'GCASH') {
             var refNum = document.getElementById('referenceNumber').value.trim();
             if (!refNum) {

@@ -86,9 +86,22 @@ function calculate_product_similarity(array $source, array $candidate): array
         $matchedAttributes[] = 'product_type';
     }
 
-    if ($source['compatibility'] !== '' && strcasecmp($source['compatibility'], $candidate['compatibility']) === 0) {
-        $score += 0.20;
-        $matchedAttributes[] = 'compatibility';
+    if ($source['compatibility'] !== '' && $candidate['compatibility'] !== '') {
+        if (strcasecmp(trim($source['compatibility']), trim($candidate['compatibility'])) === 0) {
+            $score += 0.20;
+            $matchedAttributes[] = 'compatibility';
+        } else {
+            $srcCompat = tokenize_match_text($source['compatibility']);
+            $cndCompat = tokenize_match_text($candidate['compatibility']);
+            if ($srcCompat !== [] && $cndCompat !== []) {
+                $overlap = count(array_intersect($srcCompat, $cndCompat));
+                $union = count(array_unique(array_merge($srcCompat, $cndCompat)));
+                if ($overlap > 0 && $union > 0) {
+                    $score += round(0.20 * ($overlap / $union), 2);
+                    $matchedAttributes[] = 'compatibility';
+                }
+            }
+        }
     }
 
     if ($source['brand'] !== '' && strcasecmp($source['brand'], $candidate['brand']) === 0) {
@@ -154,7 +167,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
                     }
 
                     [$score, $matchedAttribute] = calculate_product_similarity($source, $candidate);
-                    if ($score < 0.35 || $matchedAttribute === '') {
+                    if ($score < 0.20 || $matchedAttribute === '') {
                         continue;
                     }
 
@@ -174,7 +187,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
                     return $left['similarity_score'] < $right['similarity_score'] ? 1 : -1;
                 });
 
-                foreach (array_slice($matches, 0, 3) as $match) {
+                foreach ($matches as $match) {
                     $insert->execute([
                         'product_id' => $source['product_id'],
                         'alternative_product_id' => $match['alternative_product_id'],
@@ -196,8 +209,18 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
     }
 }
 
+function ensure_feature_matches_synced(PDO $pdo): void
+{
+    $count = (int) $pdo->query('SELECT COUNT(*) FROM Feature_Based_Match')->fetchColumn();
+    if ($count === 0) {
+        sync_feature_matches_for_catalog($pdo);
+    }
+}
+
 function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 {
+    ensure_feature_matches_synced($pdo);
+
     $productIds = array_values(array_unique(array_map('intval', $productIds)));
     if ($productIds === []) {
         return [];
@@ -272,13 +295,22 @@ function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acq
 function sync_inventory_from_batches(PDO $pdo, int $productId): void
 {
     $statement = $pdo->prepare(
-        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE'"
+        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE' AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
     );
     $statement->execute(['product_id' => $productId]);
     $totalStock = (int) $statement->fetchColumn();
 
     $update = $pdo->prepare('UPDATE Inventory SET current_stock = :stock WHERE product_id = :product_id');
     $update->execute(['stock' => $totalStock, 'product_id' => $productId]);
+}
+
+function get_sellable_stock(PDO $pdo, int $productId): int
+{
+    $statement = $pdo->prepare(
+        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE' AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
+    );
+    $statement->execute(['product_id' => $productId]);
+    return (int) $statement->fetchColumn();
 }
 
 function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleItemId): void
