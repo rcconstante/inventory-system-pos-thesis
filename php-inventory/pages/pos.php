@@ -233,8 +233,8 @@ foreach ($productParameters as $parameter => $value) {
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
 
-// Show recommendations when search is specific and results are limited (≤ 3 in-stock matches)
-$showRecommendations = ($searchTerm !== '' && count($products) <= 3 && recommendations_enabled());
+// Show recommendations only when there are no in-stock matches (product is out of stock)
+$showRecommendations = ($searchTerm !== '' && count($products) === 0 && recommendations_enabled());
 
 $recommendations = [];
 if ($showRecommendations) {
