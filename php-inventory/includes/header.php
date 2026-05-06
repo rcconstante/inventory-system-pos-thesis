@@ -1,6 +1,11 @@
 <?php
 $flashMessages = pull_flash_messages();
 
+if (function_exists('ensure_product_lifecycle_schema')) {
+    ensure_product_lifecycle_schema($pdo);
+    purge_expired_product_archives($pdo);
+}
+
 // Fetch Notifications
 $notifications = [];
 try {
@@ -9,7 +14,8 @@ try {
         "SELECT p.product_name, p.brand, i.current_stock
          FROM Products p
          JOIN Inventory i ON p.product_id = i.product_id
-         WHERE i.current_stock <= i.min_stock_level"
+         WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+           AND i.current_stock <= i.min_stock_level"
     );
     while ($row = $criticalStatement->fetch(PDO::FETCH_ASSOC)) {
         $name = $row['product_name'] . ($row['brand'] ? ' (' . $row['brand'] . ')' : '');
@@ -26,7 +32,9 @@ try {
         "SELECT p.product_name, p.brand, i.current_stock
          FROM Products p
          JOIN Inventory i ON p.product_id = i.product_id
-         WHERE i.current_stock > i.min_stock_level AND i.current_stock <= (i.min_stock_level + 5)"
+                 WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                     AND i.current_stock > i.min_stock_level
+                     AND i.current_stock <= (i.min_stock_level + 5)"
     );
     while ($row = $lowStockStatement->fetch(PDO::FETCH_ASSOC)) {
         $name = $row['product_name'] . ($row['brand'] ? ' (' . $row['brand'] . ')' : '');
@@ -43,7 +51,10 @@ try {
         "SELECT p.product_name, p.brand, i.expiry_date, DATEDIFF(i.expiry_date, CURDATE()) as days_left
          FROM Products p
          JOIN Inventory i ON p.product_id = i.product_id
-         WHERE i.expiry_date IS NOT NULL AND i.expiry_date >= CURDATE() AND i.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
+                 WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                     AND i.expiry_date IS NOT NULL
+                     AND i.expiry_date >= CURDATE()
+                     AND i.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
     );
     while ($row = $expiryWarningStatement->fetch(PDO::FETCH_ASSOC)) {
         $name = $row['product_name'] . ($row['brand'] ? ' (' . $row['brand'] . ')' : '');
@@ -63,7 +74,9 @@ try {
         "SELECT p.product_name, p.brand
          FROM Products p
          JOIN Inventory i ON p.product_id = i.product_id
-         WHERE i.expiry_date IS NOT NULL AND i.expiry_date < CURDATE()"
+                 WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                     AND i.expiry_date IS NOT NULL
+                     AND i.expiry_date < CURDATE()"
     );
     while ($row = $expiredStatement->fetch(PDO::FETCH_ASSOC)) {
         $name = $row['product_name'] . ($row['brand'] ? ' (' . $row['brand'] . ')' : '');

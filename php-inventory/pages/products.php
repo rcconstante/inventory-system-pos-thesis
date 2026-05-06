@@ -6,6 +6,20 @@ require_once '../includes/config.php';
 require_once '../includes/domain.php';
 
 require_login();
+ensure_product_lifecycle_schema($pdo);
+purge_expired_product_archives($pdo);
+
+function products_post_redirect_path(): string
+{
+    if (!empty($_POST['return_to_batches'])) {
+        $sourceProductId = max(0, (int) ($_POST['source_product_id'] ?? $_POST['product_id'] ?? 0));
+        if ($sourceProductId > 0) {
+            return 'pages/product_batches.php?product_id=' . $sourceProductId;
+        }
+    }
+
+    return 'pages/products.php';
+}
 
 $canManage = can_manage_catalog();
 $canDelete = can_delete_catalog();
@@ -210,7 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sync_reorder_alerts_for_catalog($pdo);
             sync_feature_matches_for_catalog($pdo);
             $pdo->commit();
-        } elseif (isset($_POST['delete_product'])) {
+        } elseif (isset($_POST['archive_product']) || isset($_POST['delete_product'])) {
             if (!$canDelete) {
                 throw new RuntimeException('You do not have permission to delete products.');
             }
@@ -221,14 +235,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->beginTransaction();
 
-            $deleteStatement = $pdo->prepare('DELETE FROM Products WHERE product_id = :product_id');
-            $deleteStatement->execute(['product_id' => $productId]);
+            archive_product($pdo, $productId);
 
             sync_reorder_alerts_for_catalog($pdo);
             sync_feature_matches_for_catalog($pdo);
             $pdo->commit();
 
-            set_flash('success', 'Product deleted successfully.');
+            set_flash('success', 'Product archived successfully. It will be removed from the active catalog after 30 days.');
         } elseif (isset($_POST['add_batch'])) {
             $productId = (int) ($_POST['product_id'] ?? 0);
             $batchNumber = trim((string) ($_POST['batch_number'] ?? ''));
@@ -297,7 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         set_flash('error', 'The action could not be completed.');
     }
 
-    redirect_to('pages/products.php');
+    redirect_to(products_post_redirect_path());
 }
 
 $categoriesStatement = $pdo->query('SELECT * FROM Category ORDER BY category_name ASC');
@@ -311,7 +324,7 @@ $countQuery = "
     SELECT COUNT(*)
     FROM Products p
     LEFT JOIN Category c ON p.category_id = c.category_id
-    WHERE 1=1
+    WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
 ";
 $queryParams = [];
 if ($selectedCategoryId > 0) {
@@ -360,7 +373,7 @@ $productsQuery = "
         JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
         GROUP BY si.product_id
     ) si ON p.product_id = si.product_id
-    WHERE 1=1
+    WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
 ";
 
 if ($selectedCategoryId > 0) {
@@ -454,8 +467,8 @@ $page_title = 'INVENTORY';
 include '../includes/header.php';
 ?>
 
-<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-    <form method="GET" class="flex items-center gap-4 flex-wrap">
+<div class="mb-6 flex flex-wrap items-center gap-4">
+    <form id="inventoryFilterForm" method="GET" class="flex flex-1 flex-wrap items-center justify-center gap-4">
         <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
             <option value="0">All Categories</option>
             <?php foreach ($categories as $category): ?>
@@ -464,11 +477,10 @@ include '../includes/header.php';
                 </option>
             <?php endforeach; ?>
         </select>
-        <div class="relative">
-            <input type="text" name="search" value="<?php echo h($searchTerm); ?>" placeholder="Search products..." class="rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 pl-9 pr-3 py-2 text-sm w-64 focus:outline-none focus:ring focus:ring-blue-500">
+        <div class="relative w-full max-w-xl">
+            <input type="text" name="search" value="<?php echo h($searchTerm); ?>" placeholder="Search products..." autocomplete="off" class="w-full rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-500">
             <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
-        <button type="submit" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Search</button>
     </form>
 
     <?php if ($canManage): ?>
@@ -511,7 +523,7 @@ include '../includes/header.php';
                 $salesCount = (int) ($product['sales_count'] ?? 0);
                 $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
                 ?>
-                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer" onclick="openProductDetailModal(<?php echo $productId; ?>)">
+                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer" onclick="window.location.href='<?php echo h(app_url('pages/product_batches.php?product_id=' . $productId)); ?>'">
                     <td class="border border-black dark:border-gray-600 p-4 text-center font-medium dark:text-gray-100">
                         P<?php echo str_pad((string)$productId, 3, '0', STR_PAD_LEFT); ?>
                     </td>
@@ -554,19 +566,13 @@ include '../includes/header.php';
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                                 </button>
                                 <?php if ($canDelete): ?>
-                                <button type="button" title="Delete" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                                <button type="button" title="Archive" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
                                     data-product-id="<?php echo $productId; ?>"
                                     data-product-name="<?php echo h($product['product_name']); ?>"
                                     onclick="openDeleteProductModal(this)">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                                 </button>
                                 <?php endif; ?>
-                                <button type="button" title="View Details" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openProductDetailModal(<?php echo $productId; ?>)">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                                </button>
-                                <button type="button" title="Batch Management" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openBatchModal(<?php echo $productId; ?>)">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-                                </button>
                             </div>
                         </td>
                     <?php endif; ?>
@@ -642,16 +648,16 @@ include '../includes/header.php';
     <div id="deleteProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-sm rounded-lg bg-white dark:bg-gray-800 p-6 shadow-xl dark:text-gray-100">
             <div class="mb-4 flex items-center justify-between border-b dark:border-gray-600 pb-3">
-                <h2 class="text-lg font-bold">Delete Product</h2>
+                <h2 class="text-lg font-bold">Archive Product</h2>
                 <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="text-gray-500 hover:text-black dark:hover:text-white">Close</button>
             </div>
-            <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">Are you sure you want to delete <strong id="deleteProductName"></strong>? This action cannot be undone.</p>
+            <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">Are you sure you want to archive <strong id="deleteProductName"></strong>? Archived products are hidden immediately and removed from the active catalog after 30 days.</p>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="product_id" id="deleteProductId">
                 <div class="flex justify-end gap-2">
                     <button type="button" onclick="toggleProductModal('deleteProductModal', false)" class="rounded border dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Cancel</button>
-                    <button type="submit" name="delete_product" class="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">Delete</button>
+                    <button type="submit" name="archive_product" class="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700">Archive</button>
                 </div>
             </form>
         </div>
@@ -996,26 +1002,56 @@ include '../includes/header.php';
         toggleProductModal('deleteBatchModal', true);
     }
 
-    // Smooth pagination — Next/Previous without full page reload
+    // Smooth inventory filtering and pagination without full page reload
     (function() {
         var container = document.getElementById('productsTableContainer');
-        if (!container) return;
+        var filterForm = document.getElementById('inventoryFilterForm');
+        var searchTimer = null;
+        if (!container || !filterForm) return;
 
-        document.addEventListener('click', function(e) {
-            var link = e.target.closest('a[href^="?"]');
-            if (!link || !container.contains(link)) return;
-            if (!link.textContent.match(/Previous|Next/)) return;
-            e.preventDefault();
-
+        function setLoadingState(isLoading) {
             var loading = document.getElementById('productsTableLoading');
-            if (loading) loading.classList.remove('hidden');
+            if (!loading) return;
+            loading.classList.toggle('hidden', !isLoading);
+        }
 
-            var url = link.href;
+        function buildInventoryUrl(form) {
+            var url = new URL(form.getAttribute('action') || window.location.href, window.location.origin);
+            url.search = '';
+
+            var formData = new FormData(form);
+            formData.forEach(function(value, key) {
+                var normalizedValue = String(value).trim();
+                if (normalizedValue === '' || (key === 'category_id' && normalizedValue === '0')) {
+                    url.searchParams.delete(key);
+                    return;
+                }
+                url.searchParams.set(key, normalizedValue);
+            });
+
+            url.searchParams.delete('page');
+            return url.toString();
+        }
+
+        function syncProductsTable(newContainer) {
+            container.setAttribute('data-products', newContainer.getAttribute('data-products') || '[]');
+            container.innerHTML = newContainer.innerHTML;
+
+            var raw = container.getAttribute('data-products');
+            try {
+                productData = raw ? JSON.parse(raw) : [];
+            } catch (error) {
+                productData = [];
+            }
+        }
+
+        function fetchInventory(url, preserveScroll) {
+            setLoadingState(true);
 
             fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                .then(function(r) {
-                    if (!r.ok) throw new Error('HTTP ' + r.status);
-                    return r.text();
+                .then(function(response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.text();
                 })
                 .then(function(html) {
                     var doc = (new DOMParser()).parseFromString(html, 'text/html');
@@ -1025,20 +1061,53 @@ include '../includes/header.php';
                         return;
                     }
 
-                    container.innerHTML = newContainer.innerHTML;
+                    syncProductsTable(newContainer);
                     history.pushState({}, '', url);
 
-                    // Re-extract productData from data-products attribute
-                    var raw = newContainer.getAttribute('data-products');
-                    if (raw) {
-                        try { window.productData = JSON.parse(raw); } catch(e) {}
+                    if (!preserveScroll) {
+                        window.scrollTo({ top: container.offsetTop - 20, behavior: 'smooth' });
                     }
-
-                    window.scrollTo({ top: container.offsetTop - 20, behavior: 'smooth' });
                 })
                 .catch(function() {
                     window.location.href = url;
+                })
+                .finally(function() {
+                    setLoadingState(false);
                 });
+        }
+
+        if (!window.inventoryLiveSearchAttached) {
+            window.inventoryLiveSearchAttached = true;
+
+            document.addEventListener('input', function(e) {
+                if (!e.target || e.target.name !== 'search' || e.target.closest('#inventoryFilterForm') !== filterForm) {
+                    return;
+                }
+
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(function() {
+                    fetchInventory(buildInventoryUrl(filterForm), true);
+                }, 220);
+            });
+
+            document.addEventListener('submit', function(e) {
+                if (e.target !== filterForm) {
+                    return;
+                }
+
+                e.preventDefault();
+                clearTimeout(searchTimer);
+                fetchInventory(buildInventoryUrl(filterForm), true);
+            });
+        }
+
+        document.addEventListener('click', function(e) {
+            var link = e.target.closest('a[href^="?"]');
+            if (!link || !container.contains(link)) return;
+            if (!link.textContent.match(/Previous|Next/)) return;
+            e.preventDefault();
+
+            fetchInventory(link.href, false);
         });
 
         window.addEventListener('popstate', function() {

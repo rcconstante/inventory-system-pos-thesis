@@ -8,6 +8,7 @@ require_once '../includes/domain.php';
 require_login([APP_ROLE_CASHIER]);
 
 $cashierId = (int) current_user_id();
+$queryString = $_SERVER['QUERY_STRING'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['return_sale'])) {
@@ -73,31 +74,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             set_flash('error', 'An error occurred processing the return.');
         }
         
-        redirect_to('pages/cashier_dashboard.php');
+        redirect_to('pages/cashier_dashboard.php' . ($queryString !== '' ? '?' . $queryString : ''));
     }
 }
+
+$dateFrom = normalize_date_input($_GET['from'] ?? '') ?? date('Y-m-d');
+$dateTo = normalize_date_input($_GET['to'] ?? '') ?? date('Y-m-d');
+if ($dateFrom > $dateTo) {
+    [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+}
+
+$summaryPeriodLabel = $dateFrom === $dateTo
+    ? date('F d, Y', strtotime($dateFrom))
+    : date('F d, Y', strtotime($dateFrom)) . ' to ' . date('F d, Y', strtotime($dateTo));
 
 $transactionPage = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = max(5, min(50, (int) ($_GET['per_page'] ?? 10)));
 $offset = ($transactionPage - 1) * $perPage;
 
 $summaryStatement = $pdo->prepare(
-    "SELECT
-        COALESCE(SUM(CASE WHEN DATE(`date`) = CURDATE() AND status = 'COMPLETED' THEN total_amount ELSE 0 END), 0) AS daily_sales,
-        COALESCE(SUM(CASE WHEN DATE(`date`) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND status = 'COMPLETED' THEN total_amount ELSE 0 END), 0) AS weekly_sales
+    "SELECT COALESCE(SUM(total_amount), 0) AS period_sales
      FROM Sale
-     WHERE user_id = :user_id"
+     WHERE user_id = :user_id
+       AND status = 'COMPLETED'
+       AND DATE(`date`) BETWEEN :from AND :to"
 );
-$summaryStatement->execute(['user_id' => $cashierId]);
-$summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['daily_sales' => 0, 'weekly_sales' => 0];
+$summaryStatement->execute(['user_id' => $cashierId, 'from' => $dateFrom, 'to' => $dateTo]);
+$summary = $summaryStatement->fetch(PDO::FETCH_ASSOC) ?: ['period_sales' => 0];
 
-$countStatement = $pdo->prepare('SELECT COUNT(*) FROM Sale WHERE user_id = :user_id AND DATE(`date`) = CURDATE()');
-$countStatement->execute(['user_id' => $cashierId]);
+$countStatement = $pdo->prepare(
+    'SELECT COUNT(*) FROM Sale WHERE user_id = :user_id AND DATE(`date`) BETWEEN :from AND :to'
+);
+$countStatement->execute(['user_id' => $cashierId, 'from' => $dateFrom, 'to' => $dateTo]);
 $totalTransactions = (int) $countStatement->fetchColumn();
 
 // Separate count for the summary card — only COMPLETED (not returned) sales count as productive transactions
-$completedCountStatement = $pdo->prepare("SELECT COUNT(*) FROM Sale WHERE user_id = :user_id AND DATE(`date`) = CURDATE() AND status = 'COMPLETED'");
-$completedCountStatement->execute(['user_id' => $cashierId]);
+$completedCountStatement = $pdo->prepare(
+    "SELECT COUNT(*)
+     FROM Sale
+     WHERE user_id = :user_id
+       AND status = 'COMPLETED'
+       AND DATE(`date`) BETWEEN :from AND :to"
+);
+$completedCountStatement->execute(['user_id' => $cashierId, 'from' => $dateFrom, 'to' => $dateTo]);
 $completedTransactions = (int) $completedCountStatement->fetchColumn();
 
 $totalPages = max(1, (int) ceil($totalTransactions / $perPage));
@@ -110,11 +129,14 @@ if ($transactionPage > $totalPages) {
 $transactionsStatement = $pdo->prepare(
     "SELECT sale_id, payment_method, total_amount, status, `date`
      FROM Sale
-     WHERE user_id = :user_id AND DATE(`date`) = CURDATE()
+    WHERE user_id = :user_id
+      AND DATE(`date`) BETWEEN :from AND :to
      ORDER BY `date` DESC, sale_id DESC
      LIMIT :limit OFFSET :offset"
 );
 $transactionsStatement->bindValue(':user_id', $cashierId, PDO::PARAM_INT);
+$transactionsStatement->bindValue(':from', $dateFrom, PDO::PARAM_STR);
+$transactionsStatement->bindValue(':to', $dateTo, PDO::PARAM_STR);
 $transactionsStatement->bindValue(':limit', $perPage, PDO::PARAM_INT);
 $transactionsStatement->bindValue(':offset', $offset, PDO::PARAM_INT);
 $transactionsStatement->execute();
@@ -139,21 +161,45 @@ include '../includes/header.php';
 
 <h2 class="mb-8 text-2xl font-normal text-black dark:text-gray-100">WELCOME TO FIVE BROTHERS TRADING</h2>
 
+<form method="GET" class="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-4">
+    <div>
+        <label class="mb-1 block text-sm font-medium dark:text-gray-200">From</label>
+        <input type="date" name="from" value="<?php echo h($dateFrom); ?>" class="rounded border border-black dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-900 dark:text-gray-100">
+    </div>
+    <div>
+        <label class="mb-1 block text-sm font-medium dark:text-gray-200">To</label>
+        <input type="date" name="to" value="<?php echo h($dateTo); ?>" class="rounded border border-black dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-900 dark:text-gray-100">
+    </div>
+    <div>
+        <label class="mb-1 block text-sm font-medium dark:text-gray-200">Rows</label>
+        <select name="per_page" class="rounded border border-black dark:border-gray-600 px-3 py-2 text-sm dark:bg-gray-900 dark:text-gray-100">
+            <?php foreach ([10, 20, 30, 50] as $option): ?>
+                <option value="<?php echo h((string) $option); ?>" <?php echo $perPage === $option ? 'selected' : ''; ?>><?php echo h((string) $option); ?></option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    <button type="submit" class="rounded bg-black dark:bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:hover:bg-gray-500">Apply</button>
+    <a href="?from=<?php echo h(date('Y-m-d')); ?>&to=<?php echo h(date('Y-m-d')); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded border border-black dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Today</a>
+</form>
+
 <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
     <div class="flex flex-col items-center justify-center rounded-lg bg-[#8E9CFF] p-8 text-black text-center shadow-sm h-32">
-        <p class="text-lg font-normal mb-1">Daily Transaction (Today)</p>
+        <p class="text-lg font-normal mb-1">Completed Transactions</p>
+        <p class="text-sm mb-1"><?php echo h($summaryPeriodLabel); ?></p>
         <p class="text-3xl font-bold"><?php echo h((string) $completedTransactions); ?></p>
     </div>
 
     <div class="flex flex-col items-center justify-center rounded-lg bg-[#4CD995] p-8 text-black text-center shadow-sm h-32">
-        <p class="text-lg font-normal mb-1">Daily Sales (Today)</p>
-        <p class="text-3xl font-bold">P<?php echo h(money_format_php((float) $summary['daily_sales'])); ?></p>
+        <p class="text-lg font-normal mb-1">Sales</p>
+        <p class="text-sm mb-1"><?php echo h($summaryPeriodLabel); ?></p>
+        <p class="text-3xl font-bold">P<?php echo h(money_format_php((float) ($summary['period_sales'] ?? 0))); ?></p>
     </div>
 </div>
 
 <div>
     <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <h3 class="text-base font-bold">TODAY'S TRANSACTION</h3>
+        <h3 class="text-base font-bold">TRANSACTIONS</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400"><?php echo h($summaryPeriodLabel); ?></p>
     </div>
 
     <div class="overflow-hidden rounded-lg border border-black dark:border-gray-600">
@@ -167,7 +213,7 @@ include '../includes/header.php';
         </div>
 
         <?php if ($transactions === []): ?>
-            <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">No transactions recorded today.</div>
+            <div class="p-4 text-center text-sm text-gray-500 dark:text-gray-400">No transactions recorded for the selected date range.</div>
         <?php else: ?>
             <?php foreach ($transactions as $transaction): 
                 $saleId = $transaction['sale_id'];
@@ -194,14 +240,17 @@ include '../includes/header.php';
     </div>
 
     <div class="mt-6 flex justify-end gap-3">
+        <?php $paginationParams = ['from' => $dateFrom, 'to' => $dateTo, 'per_page' => $perPage]; ?>
         <?php if ($transactionPage > 1): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage - 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Previous</a>
+            <?php $paginationParams['page'] = $transactionPage - 1; ?>
+            <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Previous</a>
         <?php else: ?>
             <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Previous</button>
         <?php endif; ?>
 
         <?php if ($transactionPage < $totalPages): ?>
-            <a href="?page=<?php echo h((string) ($transactionPage + 1)); ?>&per_page=<?php echo h((string) $perPage); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Next</a>
+            <?php $paginationParams['page'] = $transactionPage + 1; ?>
+            <a href="?<?php echo h(http_build_query($paginationParams)); ?>" class="rounded-lg border border-black dark:border-gray-600 px-6 py-2 text-black dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700">Next</a>
         <?php else: ?>
             <button disabled class="rounded-lg border border-gray-300 dark:border-gray-600 px-6 py-2 text-gray-400 dark:text-gray-500 cursor-not-allowed">Next</button>
         <?php endif; ?>

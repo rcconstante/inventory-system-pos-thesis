@@ -6,6 +6,8 @@ require_once '../includes/config.php';
 require_once '../includes/domain.php';
 
 require_login([APP_ROLE_ADMIN, APP_ROLE_CASHIER]);
+ensure_product_lifecycle_schema($pdo);
+purge_expired_product_archives($pdo);
 
 if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
@@ -28,7 +30,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $productStatement = $pdo->prepare(
-                'SELECT p.product_id, p.product_name, p.brand, p.price FROM Products p WHERE p.product_id = :product_id LIMIT 1'
+                                "SELECT p.product_id, p.product_name, p.brand, p.price
+                                 FROM Products p
+                                 WHERE p.product_id = :product_id
+                                     AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                                 LIMIT 1"
             );
             $productStatement->execute(['product_id' => $productId]);
             $product = $productStatement->fetch(PDO::FETCH_ASSOC);
@@ -105,7 +111,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $totalAmount = 0.0;
 
             $productStatement = $pdo->prepare(
-                'SELECT p.product_name, p.price FROM Products p WHERE p.product_id = :product_id FOR UPDATE'
+                                "SELECT p.product_name, p.price
+                                 FROM Products p
+                                 WHERE p.product_id = :product_id
+                                     AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                                 FOR UPDATE"
             );
 
             foreach ($_SESSION['cart'] as $productId => $item) {
@@ -197,6 +207,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $searchTerm = trim((string) ($_GET['q'] ?? ''));
+$selectedCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
+
+$categoriesStatement = $pdo->query('SELECT category_id, category_name FROM Category ORDER BY category_name ASC');
+$categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
 
 $productQuery = "
     SELECT
@@ -215,20 +229,27 @@ $productQuery = "
     LEFT JOIN Category c ON c.category_id = p.category_id
     LEFT JOIN Inventory i ON i.product_id = p.product_id
     WHERE COALESCE(i.current_stock, 0) > 0
+            AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
 ";
 
 $productParameters = [];
+if ($selectedCategoryId > 0) {
+    $productQuery .= ' AND p.category_id = :category_id';
+    $productParameters['category_id'] = $selectedCategoryId;
+}
+
 if ($searchTerm !== '') {
-    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3)';
+    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4)';
     $productParameters['st1'] = '%' . $searchTerm . '%';
     $productParameters['st2'] = '%' . $searchTerm . '%';
     $productParameters['st3'] = '%' . $searchTerm . '%';
+    $productParameters['st4'] = '%' . $searchTerm . '%';
 }
 
 $productQuery .= ' ORDER BY p.product_name ASC';
 $productStatement = $pdo->prepare($productQuery);
 foreach ($productParameters as $parameter => $value) {
-    $productStatement->bindValue(':' . $parameter, $value, PDO::PARAM_STR);
+    $productStatement->bindValue(':' . $parameter, $value, $parameter === 'category_id' ? PDO::PARAM_INT : PDO::PARAM_STR);
 }
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
@@ -242,12 +263,21 @@ if ($showRecommendations) {
     $searchAllQuery = "
         SELECT p.product_id
         FROM Products p
-        WHERE (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3)
+        LEFT JOIN Category c ON c.category_id = p.category_id
+        WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
     ";
+    if ($selectedCategoryId > 0) {
+        $searchAllQuery .= ' AND p.category_id = :category_id';
+    }
+    $searchAllQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4)';
     $searchAllStmt = $pdo->prepare($searchAllQuery);
+    if ($selectedCategoryId > 0) {
+        $searchAllStmt->bindValue(':category_id', $selectedCategoryId, PDO::PARAM_INT);
+    }
     $searchAllStmt->bindValue(':st1', '%' . $searchTerm . '%', PDO::PARAM_STR);
     $searchAllStmt->bindValue(':st2', '%' . $searchTerm . '%', PDO::PARAM_STR);
     $searchAllStmt->bindValue(':st3', '%' . $searchTerm . '%', PDO::PARAM_STR);
+    $searchAllStmt->bindValue(':st4', '%' . $searchTerm . '%', PDO::PARAM_STR);
     $searchAllStmt->execute();
     $sourceIds = array_map('intval', $searchAllStmt->fetchAll(PDO::FETCH_COLUMN));
 
@@ -312,11 +342,21 @@ include '../includes/header.php';
     <div class="flex-1 flex flex-col bg-white dark:bg-gray-900 border-r border-black dark:border-black relative">
         <!-- Search -->
         <div class="border-b border-black dark:border-black">
-             <form method="GET" class="relative">
-                 <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                     <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-black dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+             <form method="GET" class="flex flex-wrap items-center gap-3 p-4">
+                 <select name="category_id" class="rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-3 text-sm font-medium text-black dark:text-white focus:outline-none">
+                     <option value="0">All Categories</option>
+                     <?php foreach ($categories as $category): ?>
+                         <option value="<?php echo h((string) $category['category_id']); ?>" <?php echo $selectedCategoryId === (int) $category['category_id'] ? 'selected' : ''; ?>>
+                             <?php echo h($category['category_name']); ?>
+                         </option>
+                     <?php endforeach; ?>
+                 </select>
+                 <div class="relative min-w-[280px] flex-1">
+                     <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                         <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-black dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                     </div>
+                     <input type="text" name="q" value="<?php echo h($searchTerm); ?>" placeholder="Search product, brand, compatibility, or category" class="w-full rounded border border-black dark:border-gray-600 bg-transparent pl-14 pr-4 py-3 text-base focus:ring-0 dark:bg-gray-800 dark:text-white placeholder-gray-400 outline-none">
                  </div>
-                 <input type="text" name="q" value="<?php echo h($searchTerm); ?>" placeholder="Engine Oil 10W-40" class="w-full pl-14 pr-4 py-5 text-lg border-0 focus:ring-0 bg-transparent dark:bg-gray-800 dark:text-white placeholder-gray-400 outline-none">
              </form>
         </div>
         
@@ -850,6 +890,13 @@ include '../includes/header.php';
                             e.target.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
                         }
                     }, 300);
+                }
+            });
+            document.addEventListener('change', function(e) {
+                if (e.target && e.target.name === 'category_id' && e.target.closest('#pos-main-view')) {
+                    if (e.target.form) {
+                        e.target.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                    }
                 }
             });
         }

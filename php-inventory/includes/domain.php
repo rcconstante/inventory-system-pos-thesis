@@ -18,8 +18,114 @@ function fetch_role_options(PDO $pdo): array
     return $statement->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function table_column_exists(PDO $pdo, string $tableName, string $columnName): bool
+{
+    $statement = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = :table_name
+           AND COLUMN_NAME = :column_name'
+    );
+    $statement->execute([
+        'table_name' => $tableName,
+        'column_name' => $columnName,
+    ]);
+
+    return (int) $statement->fetchColumn() > 0;
+}
+
+function ensure_product_lifecycle_schema(PDO $pdo): void
+{
+    static $ensured = false;
+
+    if ($ensured) {
+        return;
+    }
+
+    $alterClauses = [];
+
+    if (!table_column_exists($pdo, 'Products', 'product_status')) {
+        $alterClauses[] = "ADD COLUMN product_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'";
+    }
+
+    if (!table_column_exists($pdo, 'Products', 'archived_at')) {
+        $alterClauses[] = 'ADD COLUMN archived_at DATETIME NULL';
+    }
+
+    if (!table_column_exists($pdo, 'Products', 'purge_after')) {
+        $alterClauses[] = 'ADD COLUMN purge_after DATETIME NULL';
+    }
+
+    if (!table_column_exists($pdo, 'Products', 'deleted_at')) {
+        $alterClauses[] = 'ADD COLUMN deleted_at DATETIME NULL';
+    }
+
+    foreach ($alterClauses as $alterClause) {
+        $pdo->exec('ALTER TABLE Products ' . $alterClause);
+    }
+
+    $pdo->exec("UPDATE Products SET product_status = 'ACTIVE' WHERE product_status IS NULL OR product_status = ''");
+    $ensured = true;
+}
+
+function purge_expired_product_archives(PDO $pdo): int
+{
+    ensure_product_lifecycle_schema($pdo);
+
+    $statement = $pdo->prepare(
+        "UPDATE Products
+         SET product_status = 'DELETED',
+             deleted_at = COALESCE(deleted_at, NOW())
+         WHERE COALESCE(product_status, 'ACTIVE') = 'ARCHIVED'
+           AND purge_after IS NOT NULL
+           AND purge_after <= NOW()"
+    );
+    $statement->execute();
+
+    return $statement->rowCount();
+}
+
+function archive_product(PDO $pdo, int $productId): void
+{
+    ensure_product_lifecycle_schema($pdo);
+
+    $statusStatement = $pdo->prepare(
+        "SELECT COALESCE(product_status, 'ACTIVE') AS product_status
+         FROM Products
+         WHERE product_id = :product_id
+         LIMIT 1"
+    );
+    $statusStatement->execute(['product_id' => $productId]);
+    $currentStatus = $statusStatement->fetchColumn();
+
+    if ($currentStatus === false) {
+        throw new RuntimeException('The selected product was not found.');
+    }
+
+    if ($currentStatus === 'ARCHIVED') {
+        throw new RuntimeException('That product is already archived.');
+    }
+
+    if ($currentStatus === 'DELETED') {
+        throw new RuntimeException('That product has already been removed from the active catalog.');
+    }
+
+    $archiveStatement = $pdo->prepare(
+        "UPDATE Products
+         SET product_status = 'ARCHIVED',
+             archived_at = COALESCE(archived_at, NOW()),
+             purge_after = COALESCE(purge_after, DATE_ADD(NOW(), INTERVAL 30 DAY)),
+             deleted_at = NULL
+         WHERE product_id = :product_id"
+    );
+    $archiveStatement->execute(['product_id' => $productId]);
+}
+
 function sync_reorder_alerts_for_catalog(PDO $pdo): void
 {
+    ensure_product_lifecycle_schema($pdo);
+
     $alreadyInTransaction = $pdo->inTransaction();
 
     if (!$alreadyInTransaction) {
@@ -30,9 +136,12 @@ function sync_reorder_alerts_for_catalog(PDO $pdo): void
         $pdo->exec('DELETE FROM Reorder_Alert');
 
         $statement = $pdo->query(
-            'SELECT product_id, current_stock, min_stock_level
-             FROM Inventory
-             WHERE min_stock_level > 0 AND current_stock <= min_stock_level'
+                        "SELECT i.product_id, i.current_stock, i.min_stock_level
+                         FROM Inventory i
+                         INNER JOIN Products p ON p.product_id = i.product_id
+                         WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
+                             AND i.min_stock_level > 0
+                             AND i.current_stock <= i.min_stock_level"
         );
         $alerts = $statement->fetchAll(PDO::FETCH_ASSOC);
 
@@ -128,6 +237,8 @@ function calculate_product_similarity(array $source, array $candidate): array
 
 function sync_feature_matches_for_catalog(PDO $pdo): void
 {
+    ensure_product_lifecycle_schema($pdo);
+
     $alreadyInTransaction = $pdo->inTransaction();
 
     $statement = $pdo->query(
@@ -141,6 +252,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             COALESCE(specification, '') AS specification,
             COALESCE(compatibility, '') AS compatibility
          FROM Products
+            WHERE COALESCE(product_status, 'ACTIVE') = 'ACTIVE'
          ORDER BY product_id ASC"
     );
     $products = $statement->fetchAll(PDO::FETCH_ASSOC);
@@ -219,6 +331,7 @@ function ensure_feature_matches_synced(PDO $pdo): void
 
 function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 {
+    ensure_product_lifecycle_schema($pdo);
     ensure_feature_matches_synced($pdo);
 
     $productIds = array_values(array_unique(array_map('intval', $productIds)));
@@ -243,6 +356,7 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
          INNER JOIN Products p ON p.product_id = fbm.alternative_product_id
          LEFT JOIN Inventory i ON i.product_id = p.product_id
          WHERE fbm.product_id IN ($placeholders)
+                     AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
          ORDER BY fbm.product_id ASC, fbm.similarity_score DESC, p.product_name ASC"
     );
     $statement->execute($productIds);
