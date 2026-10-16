@@ -235,6 +235,58 @@ function calculate_product_similarity(array $source, array $candidate): array
     ];
 }
 
+function normalize_recommendation_attribute(string $value): string
+{
+    return strtolower(trim(preg_replace('/\s+/', ' ', $value) ?? $value));
+}
+
+function is_eligible_product_alternative(array $source, array $candidate): bool
+{
+    if ((int) ($source['category_id'] ?? 0) <= 0
+        || (int) $source['category_id'] !== (int) ($candidate['category_id'] ?? 0)) {
+        return false;
+    }
+
+    $sourceType = normalize_recommendation_attribute((string) ($source['product_type'] ?? ''));
+    if ($sourceType === '' || $sourceType !== normalize_recommendation_attribute((string) ($candidate['product_type'] ?? ''))) {
+        return false;
+    }
+
+    $sourceCompatibility = normalize_recommendation_attribute((string) ($source['compatibility'] ?? ''));
+    $candidateCompatibility = normalize_recommendation_attribute((string) ($candidate['compatibility'] ?? ''));
+    $sourceVehicles = array_values(array_filter(
+        array_map('trim', explode(',', $sourceCompatibility)),
+        static fn (string $value): bool => $value !== ''
+    ));
+    if ($sourceVehicles === [] || $candidateCompatibility === '') {
+        return false;
+    }
+
+    // Free-text keyword overlap does not prove vehicle fitment.
+    if ($candidateCompatibility !== 'universal') {
+        $candidateVehicles = array_values(array_filter(
+            array_map('trim', explode(',', $candidateCompatibility)),
+            static fn (string $value): bool => $value !== ''
+        ));
+        if (array_diff($sourceVehicles, $candidateVehicles) !== []) {
+            return false;
+        }
+    }
+
+    // Specifications are unstructured: require equality when the source specifies them.
+    $sourceSpecification = normalize_recommendation_attribute((string) ($source['specification'] ?? ''));
+    return $sourceSpecification === ''
+        || $sourceSpecification === normalize_recommendation_attribute((string) ($candidate['specification'] ?? ''));
+}
+
+function compare_product_recommendations(array $left, array $right): int
+{
+    return ((float) $right['similarity_score'] <=> (float) $left['similarity_score'])
+        ?: ((float) $left['price'] <=> (float) $right['price'])
+        ?: strcasecmp($left['alternative_name'], $right['alternative_name'])
+        ?: ((int) $left['alternative_id'] <=> (int) $right['alternative_id']);
+}
+
 function sync_feature_matches_for_catalog(PDO $pdo): void
 {
     ensure_product_lifecycle_schema($pdo);
@@ -271,10 +323,9 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             );
 
             foreach ($products as $source) {
-                $matches = [];
-
                 foreach ($products as $candidate) {
-                    if ((int) $source['product_id'] === (int) $candidate['product_id']) {
+                    if ((int) $source['product_id'] === (int) $candidate['product_id']
+                        || !is_eligible_product_alternative($source, $candidate)) {
                         continue;
                     }
 
@@ -283,28 +334,11 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
                         continue;
                     }
 
-                    $matches[] = [
-                        'alternative_product_id' => (int) $candidate['product_id'],
-                        'similarity_score' => $score,
-                        'matched_attribute' => $matchedAttribute,
-                        'product_name' => $candidate['product_name'],
-                    ];
-                }
-
-                usort($matches, static function (array $left, array $right): int {
-                    if ($left['similarity_score'] === $right['similarity_score']) {
-                        return strcmp($left['product_name'], $right['product_name']);
-                    }
-
-                    return $left['similarity_score'] < $right['similarity_score'] ? 1 : -1;
-                });
-
-                foreach ($matches as $match) {
                     $insert->execute([
                         'product_id' => $source['product_id'],
-                        'alternative_product_id' => $match['alternative_product_id'],
-                        'similarity_score' => $match['similarity_score'],
-                        'matched_attribute' => $match['matched_attribute'],
+                        'alternative_product_id' => $candidate['product_id'],
+                        'similarity_score' => $score,
+                        'matched_attribute' => $matchedAttribute,
                     ]);
                 }
             }
@@ -331,13 +365,13 @@ function ensure_feature_matches_synced(PDO $pdo): void
 
 function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 {
-    ensure_product_lifecycle_schema($pdo);
-    ensure_feature_matches_synced($pdo);
-
     $productIds = array_values(array_unique(array_map('intval', $productIds)));
     if ($productIds === []) {
         return [];
     }
+
+    ensure_product_lifecycle_schema($pdo);
+    ensure_feature_matches_synced($pdo);
 
     $placeholders = implode(', ', array_fill(0, count($productIds), '?'));
     $statement = $pdo->prepare(
@@ -348,22 +382,46 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
             fbm.matched_attribute,
             p.product_name AS alternative_name,
             p.brand AS alternative_brand,
+            p.category_id,
+            COALESCE(p.product_type, '') AS product_type,
             p.price,
             COALESCE(p.specification, '') AS specification,
             COALESCE(p.compatibility, '') AS compatibility,
-            COALESCE(i.current_stock, 0) AS alternative_stock
+            source.category_id AS source_category_id,
+            COALESCE(source.product_type, '') AS source_product_type,
+            COALESCE(source.specification, '') AS source_specification,
+            COALESCE(source.compatibility, '') AS source_compatibility,
+            stock.sellable_stock AS alternative_stock
          FROM Feature_Based_Match fbm
+         INNER JOIN Products source ON source.product_id = fbm.product_id
          INNER JOIN Products p ON p.product_id = fbm.alternative_product_id
-         LEFT JOIN Inventory i ON i.product_id = p.product_id
+         INNER JOIN (
+             SELECT product_id, SUM(quantity_remaining) AS sellable_stock
+             FROM Stock_Batch
+             WHERE is_depleted = 0 AND status = 'ACTIVE'
+                 AND quantity_remaining > 0
+                 AND (expiration_date IS NULL OR expiration_date >= CURDATE())
+             GROUP BY product_id
+         ) stock ON stock.product_id = p.product_id
          WHERE fbm.product_id IN ($placeholders)
+                     AND source.category_id = p.category_id
+                     AND source.product_id <> p.product_id
+                     AND COALESCE(source.product_status, 'ACTIVE') = 'ACTIVE'
+                     AND fbm.similarity_score >= 0.20
                      AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
-         ORDER BY fbm.product_id ASC, fbm.similarity_score DESC, p.product_name ASC"
+         ORDER BY fbm.product_id ASC"
     );
     $statement->execute($productIds);
 
     $recommendations = [];
     foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        if ((int) $row['alternative_stock'] <= 0) {
+        $source = [
+            'category_id' => $row['source_category_id'],
+            'product_type' => $row['source_product_type'],
+            'specification' => $row['source_specification'],
+            'compatibility' => $row['source_compatibility'],
+        ];
+        if ((int) $row['alternative_stock'] <= 0 || !is_eligible_product_alternative($source, $row)) {
             continue;
         }
 
@@ -374,6 +432,11 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
 
         $recommendations[$productId][] = $row;
     }
+
+    foreach ($recommendations as &$productRecommendations) {
+        usort($productRecommendations, 'compare_product_recommendations');
+    }
+    unset($productRecommendations);
 
     return $recommendations;
 }

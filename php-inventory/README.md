@@ -120,9 +120,16 @@ The system compares products using five weighted features to suggest alternative
 | Brand | 0.10 | Same manufacturer |
 | Specification | 0.15 | Overlapping keywords in specs (capped) |
 
-- **Minimum threshold:** 0.35 (pairs below this are not matched)
-- **Max matches:** Top 3 per product
+- **Eligibility:** Same non-empty category and product type; alternatives must be active and have remaining stock in active, non-depleted, non-expired batches, matching the checkout stock rules. Product type comparisons ignore case and repeated whitespace.
+- **Vehicle fitment:** Compatibility must be populated on both products. Every comma-separated vehicle entry on the source must be present on the alternative (case-insensitive, with whitespace normalized), unless the alternative explicitly says `Universal`. A universal source requires a universal alternative. Shared words such as a manufacturer name do not establish fitment.
+- **Specifications:** When the source has specifications, the alternative must have the same specification text, ignoring case and repeated whitespace. The schema stores free text, so the system deliberately excludes differently worded specifications rather than guessing equivalence. If the source has no specifications, no specification constraint can be inferred; enter required sizes/ratings before relying on recommendations.
+- **Minimum threshold:** 0.20, retained with the existing weights. Same-category eligibility already contributes 0.30, so this cutoff is redundant as an eligibility filter; the remaining features differentiate ranking.
+- **Ranking:** Highest similarity first, then lower selling price, then case-insensitive alphabetical product name. Product ID breaks any remaining tie. All eligible alternatives are returned; there is no top-three limit.
+- **No match:** POS displays `No suitable alternative available` when no eligible in-stock replacement is found.
 - **Auto-sync:** Recalculates when products are created, updated, or deleted
+- **Existing matches:** Eligibility is also checked when recommendations are read, so cached cross-category or incompatible pairs are excluded immediately without a database migration.
+
+Run unit checks with `php tests/recommendations.php`. For database integration checks, enable PDO MySQL and set `INVENTORY_TEST_DB_DSN` (e.g. `mysql:host=127.0.0.1;port=3306;charset=utf8mb4`, without `dbname`), `INVENTORY_TEST_DB_USER`, and `INVENTORY_TEST_DB_PASS` for a disposable local MySQL/MariaDB server. The test creates a uniquely named database using the repository's tables and drops only that database afterward. Use PHP 8.1+.
 
 ### Example
 

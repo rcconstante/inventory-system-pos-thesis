@@ -303,8 +303,7 @@ foreach ($recommendations as $recList) {
         }
     }
 }
-// Sort by best similarity score so the most relevant alternatives appear first
-uasort($flatRecommendations, static fn (array $a, array $b): int => (float) $b['similarity_score'] <=> (float) $a['similarity_score']);
+uasort($flatRecommendations, 'compare_product_recommendations');
 
 // Check for receipt modal
 $receiptSale = null;
@@ -419,7 +418,7 @@ include '../includes/header.php';
     </div>
     
     <!-- Right side: Recommendations -->
-    <?php if ($showRecommendations && !empty($flatRecommendations)): ?>
+    <?php if ($showRecommendations): ?>
     <div id="recResizer" class="w-1 bg-gray-200 dark:bg-gray-700 cursor-col-resize hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors flex-shrink-0 relative z-10" title="Drag to resize"></div>
     <div id="recPanel" class="flex flex-col bg-white dark:bg-gray-900 flex-shrink-0" style="width:450px;">
         <div class="p-6 border-b border-black dark:border-black">
@@ -447,7 +446,7 @@ include '../includes/header.php';
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                     <?php if (empty($flatRecommendations)): ?>
-                        <tr><td colspan="4" class="py-8 text-center text-sm text-gray-500">No recommendations available</td></tr>
+                        <tr><td colspan="4" class="py-8 text-center text-sm text-gray-500">No suitable alternative available</td></tr>
                     <?php else: ?>
                         <?php foreach ($flatRecommendations as $rec): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
