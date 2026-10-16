@@ -44,8 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Invalid category selected.');
             }
 
+            $pdo->beginTransaction();
             $deleteStatement = $pdo->prepare('DELETE FROM Category WHERE category_id = :id');
             $deleteStatement->execute(['id' => $categoryId]);
+            sync_feature_matches_for_catalog($pdo);
+            $pdo->commit();
 
             set_flash('success', 'Category deleted successfully.');
         } elseif (isset($_POST['edit_category'])) {
@@ -81,10 +84,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             set_flash('success', 'Category updated successfully.');
         }
-    } catch (RuntimeException $exception) {
-        set_flash('error', $exception->getMessage());
     } catch (PDOException $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Category update failed: ' . $exception->getMessage());
         set_flash('error', 'The category action could not be completed.');
+    } catch (RuntimeException $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        set_flash('error', $exception->getMessage());
     }
 
     redirect_to('pages/category.php');

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/app.php';
+require_once __DIR__ . '/recommendations.php';
 
 function fetch_user_by_id(PDO $pdo, int $userId): ?array
 {
@@ -258,6 +259,7 @@ function is_eligible_product_alternative(array $source, array $candidate): bool
         array_map('trim', explode(',', $sourceCompatibility)),
         static fn (string $value): bool => $value !== ''
     ));
+    $sourceVehicles = array_values(array_filter(array_map('vehicle_name_key', $sourceVehicles), static fn (string $key): bool => $key !== ''));
     if ($sourceVehicles === [] || $candidateCompatibility === '') {
         return false;
     }
@@ -268,15 +270,13 @@ function is_eligible_product_alternative(array $source, array $candidate): bool
             array_map('trim', explode(',', $candidateCompatibility)),
             static fn (string $value): bool => $value !== ''
         ));
+        $candidateVehicles = array_map('vehicle_name_key', $candidateVehicles);
         if (array_diff($sourceVehicles, $candidateVehicles) !== []) {
             return false;
         }
     }
 
-    // Specifications are unstructured: require equality when the source specifies them.
-    $sourceSpecification = normalize_recommendation_attribute((string) ($source['specification'] ?? ''));
-    return $sourceSpecification === ''
-        || $sourceSpecification === normalize_recommendation_attribute((string) ($candidate['specification'] ?? ''));
+    return essential_fitment_matches($source, $candidate);
 }
 
 function compare_product_recommendations(array $left, array $right): int
@@ -302,12 +302,17 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             COALESCE(description, '') AS description,
             COALESCE(product_type, '') AS product_type,
             COALESCE(specification, '') AS specification,
+            COALESCE(essential_fitment, '{}') AS essential_fitment,
             COALESCE(compatibility, '') AS compatibility
          FROM Products
             WHERE COALESCE(product_status, 'ACTIVE') = 'ACTIVE'
          ORDER BY product_id ASC"
     );
     $products = $statement->fetchAll(PDO::FETCH_ASSOC);
+    $productsByCategory = [];
+    foreach ($products as $product) {
+        $productsByCategory[(int) $product['category_id']][] = $product;
+    }
 
     if (!$alreadyInTransaction) {
         $pdo->beginTransaction();
@@ -323,7 +328,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             );
 
             foreach ($products as $source) {
-                foreach ($products as $candidate) {
+                foreach ($productsByCategory[(int) $source['category_id']] as $candidate) {
                     if ((int) $source['product_id'] === (int) $candidate['product_id']
                         || !is_eligible_product_alternative($source, $candidate)) {
                         continue;
@@ -344,6 +349,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             }
         }
 
+        $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 2) ON DUPLICATE KEY UPDATE algorithm_version = 2');
         if (!$alreadyInTransaction) {
             $pdo->commit();
         }
@@ -357,8 +363,8 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
 
 function ensure_feature_matches_synced(PDO $pdo): void
 {
-    $count = (int) $pdo->query('SELECT COUNT(*) FROM Feature_Based_Match')->fetchColumn();
-    if ($count === 0) {
+    $version = (int) $pdo->query('SELECT algorithm_version FROM Recommendation_State WHERE state_id = 1')->fetchColumn();
+    if ($version !== 2) {
         sync_feature_matches_for_catalog($pdo);
     }
 }
@@ -386,10 +392,12 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
             COALESCE(p.product_type, '') AS product_type,
             p.price,
             COALESCE(p.specification, '') AS specification,
+            COALESCE(p.essential_fitment, '{}') AS essential_fitment,
             COALESCE(p.compatibility, '') AS compatibility,
             source.category_id AS source_category_id,
             COALESCE(source.product_type, '') AS source_product_type,
             COALESCE(source.specification, '') AS source_specification,
+            COALESCE(source.essential_fitment, '{}') AS source_essential_fitment,
             COALESCE(source.compatibility, '') AS source_compatibility,
             stock.sellable_stock AS alternative_stock
          FROM Feature_Based_Match fbm
@@ -419,6 +427,7 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
             'category_id' => $row['source_category_id'],
             'product_type' => $row['source_product_type'],
             'specification' => $row['source_specification'],
+            'essential_fitment' => $row['source_essential_fitment'],
             'compatibility' => $row['source_compatibility'],
         ];
         if ((int) $row['alternative_stock'] <= 0 || !is_eligible_product_alternative($source, $row)) {

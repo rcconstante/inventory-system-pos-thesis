@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
 require_once __DIR__ . '/../includes/domain.php';
 
@@ -34,7 +35,14 @@ check(is_eligible_product_alternative($tire, array_replace($tire, ['compatibilit
 check(!is_eligible_product_alternative(array_replace($tire, ['compatibility' => 'Universal']), $tire), 'Specific vehicle must not replace universal compatibility.');
 check(!is_eligible_product_alternative(array_replace($tire, ['compatibility' => ', ,']), array_replace($tire, ['compatibility' => ','])), 'Empty vehicle lists must not qualify.');
 check(!is_eligible_product_alternative(array_replace($tire, ['compatibility' => ', ,']), array_replace($tire, ['compatibility' => 'Universal'])), 'Universal candidate must not bypass missing source vehicle data.');
-check(is_eligible_product_alternative(array_replace($tire, ['specification' => '']), $tire), 'Unspecified source must not invent a specification requirement.');
+check(!is_eligible_product_alternative(array_replace($tire, ['specification' => '']), $tire), 'A tire with no known size must not be recommended.');
+check(is_eligible_product_alternative($tire, array_replace($tire, ['specification' => 'Premium tubeless tire, size 80 / 90 - 14 with extra grip'])), 'Additional tire description must not exclude matching size.');
+check(is_eligible_product_alternative($tire, array_replace($tire, ['compatibility' => 'Honda Click-125'])), 'Vehicle punctuation variants must match.');
+check(!is_eligible_product_alternative($tire, array_replace($tire, ['specification' => '80/90-14 and 90/90-14'])), 'Ambiguous tire sizes must not be guessed.');
+check(is_eligible_product_alternative(array_replace($tire, ['essential_fitment' => '{"size":"80/90-14","position":"front"}']), array_replace($tire, ['specification' => 'Different description', 'essential_fitment' => '{"size":"80/90-14","position":"Front","construction":"tubeless"}'])), 'Essential source requirements must match while extra candidate details are allowed.');
+check(!is_eligible_product_alternative(array_replace($tire, ['essential_fitment' => '{"position":"front"}']), array_replace($tire, ['essential_fitment' => '{"position":"rear"}'])), 'Required position mismatch must exclude candidate.');
+check(parse_essential_fitment(['size' => '80/90-14', 'position' => 'front']) === ['position' => 'front', 'size' => '80/90-14'], 'Structured fitment must parse and sort consistently.');
+try { parse_essential_fitment(['unknown' => 'value']); check(false, 'Unknown fields must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'Invalid'), 'Unknown fitment fields rejected.'); }
 [$score] = calculate_product_similarity($tire, $tire);
 check($score === 0.85, 'Existing weights must remain unchanged; short numeric tokens do not add specification points.');
 [$fullScore] = calculate_product_similarity(array_replace($tire, ['specification' => 'tubeless radial reinforced']), array_replace($tire, ['specification' => 'tubeless radial reinforced']));
@@ -96,12 +104,41 @@ if ($dsn !== false && $dsn !== '') {
             $batch->execute([$fixture[0], 'TEST-' . $fixture[0], $quantity, $fixture[0] === 12 ? '2000-01-01' : null, $fixture[0] === 13 ? 'DISPOSED' : 'ACTIVE']);
         }
         // Simulate a populated legacy cache containing invalid pairs, before any rebuild.
+        $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 2)');
         $pdo->exec("INSERT INTO Feature_Based_Match (product_id, alternative_product_id, similarity_score, matched_attribute) SELECT 1, product_id, 0.90, 'compatibility' FROM Products WHERE product_id BETWEEN 2 AND 9 OR product_id IN (12, 13)");
         $legacy = fetch_recommendations_for_products($pdo, [1]);
         check(array_column($legacy[1], 'alternative_id') === [9, 8, 7], 'Legacy cache must filter invalid, archived, unavailable, expired and disposed alternatives immediately.');
         sync_feature_matches_for_catalog($pdo);
         $results = fetch_recommendations_for_products($pdo, [1, 1, 11, 999999]);
         check(array_column($results[1], 'alternative_id') === [9, 8, 7, 10], 'Database results must follow eligibility and full ranking.');
+        $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire' WHERE product_id = 1");
+        $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire Plus' WHERE product_id = 7");
+        check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 0) === [1], 'Exact out-of-stock product must be a recommendation source even when Plus is available.');
+        check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire Plus', 0) === [], 'Exact available product must not trigger unrelated out-of-stock sources.');
+        check(find_pos_recommendation_sources($pdo, 'Dunlop', 0) === [1], 'Broad search must include out-of-stock sources alongside available matches.');
+        check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 2) === [], 'POS recommendation sources must obey category filter.');
+        check(find_pos_recommendation_sources($pdo, '%', 0) === [], 'Search wildcards must be treated literally.');
+        $pdo->beginTransaction();
+        $vehicleId = save_vehicle_option($pdo, null, 'Honda Click 125', "Honda Clik 125\nHonda Click125");
+        save_product_vehicles($pdo, 1, [(string) $vehicleId]);
+        save_product_vehicles($pdo, 7, [(string) $vehicleId]);
+        save_vehicle_option($pdo, $vehicleId, 'Honda Click 125i', 'Honda Click 125');
+        check($pdo->query('SELECT compatibility FROM Products WHERE product_id = 1')->fetchColumn() === 'Honda Click 125i', 'Renaming vehicle must update linked product text.');
+        $duplicateId = save_vehicle_option($pdo, null, 'Honda Clik 125', '');
+        save_product_vehicles($pdo, 8, [(string) $duplicateId]);
+        merge_vehicle_options($pdo, $duplicateId, $vehicleId);
+        check($pdo->query('SELECT compatibility FROM Products WHERE product_id = 8')->fetchColumn() === 'Honda Click 125i', 'Merge must move product assignments to canonical vehicle.');
+        check((int) $pdo->query("SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = 'hondaclik125'")->fetchColumn() === $vehicleId, 'Merge must retain old spelling as alias.');
+        $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 0 WHERE vehicle_id = ?')->execute([$vehicleId]);
+        save_product_vehicles($pdo, 1, [(string) $vehicleId]);
+        try { save_product_vehicles($pdo, 9, [(string) $vehicleId]); check(false, 'New archived vehicle assignment must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'unavailable'), 'Archived vehicles are blocked for new assignments.'); }
+        $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 1 WHERE vehicle_id = ?')->execute([$vehicleId]);
+        try { save_vehicle_option($pdo, null, 'Honda Click-125i', ''); check(false, 'Duplicate aliases must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'another vehicle'), 'Duplicate normalized names rejected.'); }
+        $universalId = save_vehicle_option($pdo, null, 'Universal', '');
+        try { save_product_vehicles($pdo, 9, [$vehicleId, $universalId]); check(false, 'Mixed Universal selection must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'alone'), 'Universal cannot be mixed with specific models.'); }
+        save_product_vehicles($pdo, 1, []);
+        check((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = 1')->fetchColumn() === 0, 'Removing mistaken compatibility selection must remove mapping.');
+        $pdo->rollBack();
         check(!isset($results[11]) && !isset($results[999999]), 'No suitable alternatives must return an empty result.');
         check(fetch_recommendations_for_products($pdo, []) === [], 'Empty source list must return no recommendations.');
         $pdo->exec("UPDATE Products SET product_status = 'ARCHIVED' WHERE product_id = 1");
@@ -114,6 +151,9 @@ if ($dsn !== false && $dsn !== '') {
         sync_feature_matches_for_catalog($pdo);
         check((int) $pdo->query('SELECT COUNT(*) FROM Feature_Based_Match')->fetchColumn() === 0, 'Catalog without valid pairs must have no cached matches.');
         check(fetch_recommendations_for_products($pdo, [1]) === [], 'Empty match cache must safely return no alternatives.');
+        $pdo->exec("CREATE TRIGGER reject_unnecessary_rebuild BEFORE UPDATE ON Recommendation_State FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Unexpected cache rebuild'");
+        check(fetch_recommendations_for_products($pdo, [1]) === [], 'An empty synced catalog must not trigger repeated rebuilds.');
+        $pdo->exec('DROP TRIGGER reject_unnecessary_rebuild');
         echo "Database integration checks passed.\n";
     } finally {
         $pdo->exec('DROP DATABASE `' . $database . '`');

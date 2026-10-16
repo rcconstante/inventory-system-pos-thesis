@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS Products (
     category_id INT,
     product_type VARCHAR(50),
     specification TEXT,
+    essential_fitment TEXT NULL,
     compatibility TEXT,
     FOREIGN KEY (category_id) REFERENCES Category(category_id) ON DELETE SET NULL
 );
@@ -59,6 +60,31 @@ CREATE TABLE IF NOT EXISTS Inventory (
 );
 
 -- 6. Sale
+CREATE TABLE IF NOT EXISTS Vehicle_Compatibility (
+    vehicle_id INT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_name VARCHAR(100) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS Recommendation_State (
+    state_id TINYINT PRIMARY KEY,
+    algorithm_version INT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS Vehicle_Alias (
+    alias_key VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    vehicle_id INT NOT NULL,
+    FOREIGN KEY (vehicle_id) REFERENCES Vehicle_Compatibility(vehicle_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS Product_Vehicle (
+    product_id INT NOT NULL,
+    vehicle_id INT NOT NULL,
+    PRIMARY KEY (product_id, vehicle_id),
+    FOREIGN KEY (product_id) REFERENCES Products(product_id) ON DELETE CASCADE,
+    FOREIGN KEY (vehicle_id) REFERENCES Vehicle_Compatibility(vehicle_id)
+);
+
 CREATE TABLE IF NOT EXISTS Sale (
     sale_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,

@@ -46,7 +46,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $expirationDate = !empty($_POST['expiry_date']) ? $_POST['expiry_date'] : null;
             $productType = trim((string) ($_POST['product_type'] ?? ''));
             $specification = trim((string) ($_POST['specification'] ?? ''));
-            $compatibility = trim((string) ($_POST['compatibility'] ?? ''));
+            $fitment = parse_essential_fitment($_POST['fitment'] ?? []);
+            $essentialFitment = json_encode((object) $fitment, JSON_THROW_ON_ERROR);
+            $compatibility = '';
             $currentStock = max(0, (int) ($_POST['current_stock'] ?? 0));
             $minStockLevel = max(0, (int) ($_POST['min_stock_level'] ?? 0));
             $expiryDate = !empty($_POST['expiry_date']) ? $_POST['expiry_date'] : null;
@@ -62,6 +64,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($price < 0) {
                 throw new RuntimeException('Price cannot be negative.');
             }
+
+            if (strlen($productName) > 150 || strlen($brand) > 100 || strlen($productType) > 50) {
+                throw new RuntimeException('Product name, brand or product type exceeds the allowed length.');
+            }
+            $categoryStatement = $pdo->prepare('SELECT category_id FROM Category WHERE category_id = ?');
+            $categoryStatement->execute([$categoryId]);
+            if (!$categoryStatement->fetchColumn()) throw new RuntimeException('The selected category does not exist.');
 
             $pdo->beginTransaction();
 
@@ -79,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         category_id,
                         product_type,
                         specification,
+                        essential_fitment,
                         compatibility
                      ) VALUES (
                         :product_name,
@@ -92,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :category_id,
                         :product_type,
                         :specification,
+                        :essential_fitment,
                         :compatibility
                      )'
                 );
@@ -107,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'category_id' => $categoryId,
                     'product_type' => $productType,
                     'specification' => $specification,
+                    'essential_fitment' => $essentialFitment,
                     'compatibility' => $compatibility,
                 ]);
 
@@ -130,6 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 set_flash('success', 'Product created successfully.');
             } else {
+                $existingProduct = $pdo->prepare("SELECT product_id FROM Products WHERE product_id = ? AND COALESCE(product_status, 'ACTIVE') = 'ACTIVE' FOR UPDATE");
+                $existingProduct->execute([$productId]);
+                if (!$existingProduct->fetchColumn()) throw new RuntimeException('The active product was not found.');
                 $updateProduct = $pdo->prepare(
                     'UPDATE Products
                      SET product_name = :product_name,
@@ -143,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          category_id = :category_id,
                          product_type = :product_type,
                          specification = :specification,
+                         essential_fitment = :essential_fitment,
                          compatibility = :compatibility
                      WHERE product_id = :product_id'
                 );
@@ -158,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'category_id' => $categoryId,
                     'product_type' => $productType,
                     'specification' => $specification,
+                    'essential_fitment' => $essentialFitment,
                     'compatibility' => $compatibility,
                     'product_id' => $productId,
                 ]);
@@ -221,6 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 set_flash('success', 'Product updated successfully.');
             }
 
+            save_product_vehicles($pdo, $productId, $_POST['vehicle_ids'] ?? []);
             sync_reorder_alerts_for_catalog($pdo);
             sync_feature_matches_for_catalog($pdo);
             $pdo->commit();
@@ -296,18 +314,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             set_flash('success', 'Batch deleted successfully.');
         }
+    } catch (PDOException $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        error_log('Inventory update failed: ' . $exception->getMessage());
+        set_flash('error', 'The action could not be completed.');
     } catch (RuntimeException $exception) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
 
         set_flash('error', $exception->getMessage());
-    } catch (PDOException $exception) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        set_flash('error', 'The action could not be completed.');
     }
 
     redirect_to(products_post_redirect_path());
@@ -430,7 +449,7 @@ try {
             'manufacturing_date' => $p['manufacturing_date'] ?? '',
             'expiration_date' => $p['expiration_date'] ?? '',
             'product_type' => $p['product_type'] ?? '',
-            'specification' => $p['specification'] ?? '',
+            'specification' => product_specification_display($p),
             'compatibility' => $p['compatibility'] ?? '',
             'current_stock' => (int)$p['current_stock'],
             'min_stock_level' => (int)$p['min_stock_level'],
@@ -463,6 +482,7 @@ try {
     $productDataJson = '[]';
 }
 
+$vehicleOptions = fetch_vehicle_options($pdo);
 $page_title = 'INVENTORY';
 include '../includes/header.php';
 ?>
@@ -484,6 +504,7 @@ include '../includes/header.php';
     </form>
 
     <?php if ($canManage): ?>
+        <a href="<?php echo h(app_url('pages/compatibility.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Manage Compatibility</a>
         <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
@@ -558,6 +579,7 @@ include '../includes/header.php';
                                     data-manufacturing-date="<?php echo h($product['manufacturing_date'] ?? ''); ?>"
                                     data-product-type="<?php echo h($product['product_type'] ?? ''); ?>"
                                     data-specification="<?php echo h($product['specification'] ?? ''); ?>"
+                                    data-essential-fitment="<?php echo h($product['essential_fitment'] ?? '{}'); ?>"
                                     data-compatibility="<?php echo h($product['compatibility'] ?? ''); ?>"
                                     data-current-stock="<?php echo $currentStock; ?>"
                                     data-min-stock-level="<?php echo $minStockLevel; ?>"
@@ -837,7 +859,15 @@ include '../includes/header.php';
         document.getElementById('edit_manufacturing_date').value = button.dataset.manufacturingDate || '';
         document.getElementById('edit_product_type').value = button.dataset.productType || '';
         document.getElementById('edit_specification').value = button.dataset.specification || '';
-        document.getElementById('edit_compatibility').value = button.dataset.compatibility || '';
+        var fitment = JSON.parse(button.dataset.essentialFitment || '{}');
+        document.querySelectorAll('[id^="edit_fitment_"]').forEach(function(input) {
+            input.value = fitment[input.dataset.fitmentKey] || '';
+        });
+        var vehicleNames = (button.dataset.compatibility || '').split(',').map(function(name) { return name.trim(); });
+        Array.from(document.getElementById('edit_vehicle_ids').options).forEach(function(option) {
+            option.selected = vehicleNames.includes(option.dataset.name);
+            option.disabled = option.dataset.active === '0' && !option.selected;
+        });
         document.getElementById('edit_current_stock').value = button.dataset.currentStock || '';
         document.getElementById('edit_min_stock_level').value = button.dataset.minStockLevel || '';
         document.getElementById('edit_expiry_date').value = button.dataset.expiryDate || '';
@@ -875,7 +905,7 @@ include '../includes/header.php';
         html += '<div><span class="font-bold">Status:</span> <span class="' + (product.status_label === 'FAST MOVING' ? 'text-green-600' : 'text-orange-500') + ' font-bold">' + product.status_label + '</span></div>';
 
         if (product.specification) {
-            html += '<div class="mt-3"><span class="font-bold">Specifications:</span> ' + escapeHtml(product.specification) + '</div>';
+            html += '<div class="mt-3 whitespace-pre-line"><span class="font-bold">Specifications:</span> ' + escapeHtml(product.specification) + '</div>';
         }
         if (product.compatibility) {
             html += '<div><span class="font-bold">Compatibility:</span><br>';

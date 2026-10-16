@@ -220,15 +220,22 @@ $productQuery = "
         COALESCE(p.product_type, '') AS product_type,
         COALESCE(p.compatibility, '') AS compatibility,
         COALESCE(p.specification, '') AS specification,
+        COALESCE(p.essential_fitment, '{}') AS essential_fitment,
         COALESCE(p.category_id, 0) AS category_id,
         COALESCE(c.category_name, 'Uncategorized') AS category_name,
         p.price,
-        COALESCE(i.current_stock, 0) AS current_stock,
+        stock.sellable_stock AS current_stock,
         COALESCE(i.min_stock_level, 0) AS min_stock_level
     FROM Products p
     LEFT JOIN Category c ON c.category_id = p.category_id
     LEFT JOIN Inventory i ON i.product_id = p.product_id
-    WHERE COALESCE(i.current_stock, 0) > 0
+    INNER JOIN (
+        SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
+        WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
+            AND (expiration_date IS NULL OR expiration_date >= CURDATE())
+        GROUP BY product_id
+    ) stock ON stock.product_id = p.product_id
+    WHERE stock.sellable_stock > 0
             AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
 ";
 
@@ -254,38 +261,13 @@ foreach ($productParameters as $parameter => $value) {
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
 
-// Show recommendations only when there are no in-stock matches (product is out of stock)
-$showRecommendations = ($searchTerm !== '' && count($products) === 0 && recommendations_enabled());
-
-$recommendations = [];
-if ($showRecommendations) {
-    // Search ALL products matching the search term (including out-of-stock) to find sources for recommendations
-    $searchAllQuery = "
-        SELECT p.product_id
-        FROM Products p
-        LEFT JOIN Category c ON c.category_id = p.category_id
-        WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
-    ";
-    if ($selectedCategoryId > 0) {
-        $searchAllQuery .= ' AND p.category_id = :category_id';
-    }
-    $searchAllQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4)';
-    $searchAllStmt = $pdo->prepare($searchAllQuery);
-    if ($selectedCategoryId > 0) {
-        $searchAllStmt->bindValue(':category_id', $selectedCategoryId, PDO::PARAM_INT);
-    }
-    $searchAllStmt->bindValue(':st1', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $searchAllStmt->bindValue(':st2', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $searchAllStmt->bindValue(':st3', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $searchAllStmt->bindValue(':st4', '%' . $searchTerm . '%', PDO::PARAM_STR);
-    $searchAllStmt->execute();
-    $sourceIds = array_map('intval', $searchAllStmt->fetchAll(PDO::FETCH_COLUMN));
-
-    if (!empty($sourceIds)) {
-        $recommendations = fetch_recommendations_for_products($pdo, $sourceIds);
-    }
-}
-
+$sourceIds = recommendations_enabled()
+    ? find_pos_recommendation_sources($pdo, $searchTerm, $selectedCategoryId)
+    : [];
+$showRecommendations = $sourceIds !== [];
+$recommendations = $showRecommendations
+    ? fetch_recommendations_for_products($pdo, $sourceIds)
+    : [];
 // Build a set of product IDs already visible in the main list (so we don't recommend duplicates)
 $inStockProductIds = array_flip(array_map('intval', array_column($products, 'product_id')));
 
@@ -396,7 +378,7 @@ include '../includes/header.php';
                                         <input type="hidden" name="qty" value="1">
                                         <button type="submit" name="add_to_cart" class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">Add</button>
                                     </form>
-                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($product["product_name"])); ?>, <?php echo h(json_encode($product["specification"] ?? "")); ?>, <?php echo h(json_encode($product["compatibility"] ?? "")); ?>, <?php echo (int)$product["product_id"]; ?>)' class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
+                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($product["product_name"])); ?>, <?php echo h(json_encode(product_specification_display($product))); ?>, <?php echo h(json_encode($product["compatibility"] ?? "")); ?>, <?php echo (int)$product["product_id"]; ?>)' class="border border-black dark:border-black rounded px-3 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 bg-transparent text-black dark:text-white">View</button>
                                 </div>
                             </td>
                         </tr>
@@ -459,7 +441,7 @@ include '../includes/header.php';
                                     <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                     <input type="hidden" name="qty" value="1">
                                     <button type="submit" name="add_to_cart" class="border border-black dark:border-gray-600 rounded px-2 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white whitespace-nowrap">Add</button>
-                                    <button type="button" onclick="openSpecsModal('<?php echo h(addslashes($rec['alternative_name'])); ?>', '<?php echo h(addslashes($rec['specification'] ?? '')); ?>', '<?php echo h(addslashes($rec['compatibility'] ?? '')); ?>', <?php echo (int)$rec['alternative_id']; ?>)" class="border border-black dark:border-gray-600 rounded px-2 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white whitespace-nowrap">View</button>
+                                    <button type="button" onclick='openSpecsModal(<?php echo h(json_encode($rec["alternative_name"])); ?>, <?php echo h(json_encode(product_specification_display($rec))); ?>, <?php echo h(json_encode($rec["compatibility"] ?? "")); ?>, <?php echo (int)$rec["alternative_id"]; ?>)' class="border border-black dark:border-gray-600 rounded px-2 py-1 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 bg-transparent text-black dark:text-white whitespace-nowrap">View</button>
                                 </form>
                             </td>
                         </tr>
@@ -805,10 +787,18 @@ include '../includes/header.php';
     }
     
     function openSpecsModal(name, specification, compatibility, productId) {
-        var compatItems = (compatibility && compatibility.trim()) ? compatibility.split(',').map(c => '<li>' + c.trim() + '</li>').join('') : '<li>N/A</li>';
-        var specItems = (specification && specification.trim()) ? specification.split(',').map(s => '<li>' + s.trim() + '</li>').join('') : '<li>N/A</li>';
-        document.getElementById('specsCompatibility').innerHTML = compatItems;
-        document.getElementById('specsDetails').innerHTML = specItems;
+        function fillList(id, text, separator) {
+            var list = document.getElementById(id);
+            var items = (text || '').split(separator).map(function(item) { return item.trim(); }).filter(Boolean);
+            list.replaceChildren();
+            (items.length ? items : ['N/A']).forEach(function(item) {
+                var row = document.createElement('li');
+                row.textContent = item;
+                list.appendChild(row);
+            });
+        }
+        fillList('specsCompatibility', compatibility, ',');
+        fillList('specsDetails', specification, /[,\r\n]+/);
         document.getElementById('specsProductId').value = productId || '';
         document.getElementById('specsModal').classList.remove('hidden');
         document.getElementById('specsModal').classList.add('flex');

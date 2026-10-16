@@ -2,13 +2,14 @@
 declare(strict_types=1);
 
 $host = getenv('INVENTORY_DB_HOST') ?: '127.0.0.1';
+$port = getenv('INVENTORY_DB_PORT') ?: '3306';
 $dbUser = getenv('INVENTORY_DB_USER') ?: 'root';
 $dbPass = getenv('INVENTORY_DB_PASS') ?: '';
 $dbName = getenv('INVENTORY_DB_NAME') ?: 'inventory_pos_db';
 
 try {
     $pdo = new PDO(
-        "mysql:host={$host};dbname={$dbName};charset=utf8mb4",
+        "mysql:host={$host};port={$port};dbname={$dbName};charset=utf8mb4",
         $dbUser,
         $dbPass,
         [
