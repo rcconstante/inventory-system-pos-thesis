@@ -6,6 +6,27 @@ function vehicle_name_key(string $value): string
     return preg_replace('/[^a-z0-9]/', '', strtolower($value)) ?? '';
 }
 
+function save_product_type_option(PDO $pdo, string $name): array
+{
+    $name = trim(preg_replace('/\s+/', ' ', $name) ?? $name);
+    $key = vehicle_name_key($name);
+    if ($name === '' || strlen($name) > 50 || $key === '' || str_contains($name, ',')) throw new RuntimeException('Enter one product type of up to 50 characters, without commas.');
+    $pdo->prepare('INSERT INTO Product_Type (type_name, type_key) VALUES (?, ?) ON DUPLICATE KEY UPDATE type_id = LAST_INSERT_ID(type_id)')->execute([$name, $key]);
+    $lookup = $pdo->prepare('SELECT type_id, type_name FROM Product_Type WHERE type_key = ?');
+    $lookup->execute([$key]);
+    return $lookup->fetch(PDO::FETCH_ASSOC);
+}
+
+function resolve_product_type(PDO $pdo, string $name): string
+{
+    if ($name === '') return '';
+    $lookup = $pdo->prepare('SELECT type_name FROM Product_Type WHERE type_key = ?');
+    $lookup->execute([vehicle_name_key($name)]);
+    $canonical = $lookup->fetchColumn();
+    if ($canonical === false) throw new RuntimeException('Select an existing product type, or add the new type first.');
+    return $canonical;
+}
+
 function essential_fitment_fields(): array
 {
     return ['size' => 'Tire size', 'position' => 'Position', 'voltage' => 'Voltage', 'viscosity' => 'Oil viscosity', 'mounting' => 'Mounting / thread size', 'rating' => 'Required rating'];

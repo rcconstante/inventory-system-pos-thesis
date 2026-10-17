@@ -71,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $categoryStatement = $pdo->prepare('SELECT category_id FROM Category WHERE category_id = ?');
             $categoryStatement->execute([$categoryId]);
             if (!$categoryStatement->fetchColumn()) throw new RuntimeException('The selected category does not exist.');
+            $productType = resolve_product_type($pdo, $productType);
 
             $pdo->beginTransaction();
 
@@ -483,6 +484,7 @@ try {
 }
 
 $vehicleOptions = fetch_vehicle_options($pdo);
+$productTypeOptions = $pdo->query('SELECT type_id, type_name FROM Product_Type ORDER BY type_name, type_id')->fetchAll(PDO::FETCH_ASSOC);
 $page_title = 'INVENTORY';
 include '../includes/header.php';
 ?>
@@ -854,6 +856,7 @@ include '../includes/header.php';
             var key = field.replace(/_([a-z])/g, function(match, letter) { return letter.toUpperCase(); });
             document.getElementById(prefix + field).value = data[key] || '';
         });
+        document.getElementById(prefix + 'product_type').dispatchEvent(new Event('catalog-selection-change'));
         if (!duplicate) document.getElementById('edit_product_id').value = data.productId;
         else document.getElementById('product_name').value = (data.productName || '').slice(0, 143) + ' (Copy)';
         var fitment;
@@ -867,7 +870,7 @@ include '../includes/header.php';
             option.selected = vehicleNames.includes(option.dataset.name) && (!duplicate || option.dataset.active === '1');
             option.disabled = option.dataset.active === '0' && !option.selected;
         });
-        vehicles.dispatchEvent(new Event('vehicle-selection-change'));
+        vehicles.dispatchEvent(new Event('catalog-selection-change'));
         document.getElementById(prefix + 'current_stock').value = duplicate ? '0' : data.currentStock || '0';
         document.getElementById(prefix + 'manufacturing_date').value = duplicate ? '' : data.manufacturingDate || '';
         document.getElementById(prefix + 'expiry_date').value = duplicate ? '' : data.expiryDate || '';
@@ -1166,5 +1169,5 @@ include '../includes/header.php';
     })();
 </script>
 
-<script src="<?php echo h(app_url('assets/vehicle-picker.js')); ?>" defer></script>
+<script src="<?php echo h(app_url('assets/catalog-picker.js')); ?>" defer></script>
 <?php include '../includes/footer.php'; ?>

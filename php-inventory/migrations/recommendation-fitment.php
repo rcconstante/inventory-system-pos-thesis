@@ -14,7 +14,7 @@ if (!table_column_exists($pdo, 'Products', 'essential_fitment')) {
     $pdo->exec('ALTER TABLE Products ADD COLUMN essential_fitment TEXT NULL');
 }
 $schema = file_get_contents(__DIR__ . '/../database.sql');
-preg_match_all('/CREATE TABLE IF NOT EXISTS (?:Vehicle_Compatibility|Vehicle_Alias|Product_Vehicle|Recommendation_State) .*?;/s', $schema, $tables);
+preg_match_all('/CREATE TABLE IF NOT EXISTS (?:Vehicle_Compatibility|Vehicle_Alias|Product_Vehicle|Recommendation_State|Product_Type) .*?;/s', $schema, $tables);
 foreach ($tables[0] as $table) $pdo->exec($table);
 $pdo->beginTransaction();
 try {
@@ -31,10 +31,20 @@ try {
             $insert->execute([(int) $product['product_id'], (int) $id]);
         }
     }
+    $types = $pdo->query("SELECT product_id, product_type FROM Products WHERE COALESCE(product_type, '') <> '' ORDER BY product_id FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
+    $updateType = $pdo->prepare('UPDATE Products SET product_type = ? WHERE product_id = ?');
+    foreach ($types as $product) {
+        if (trim($product['product_type']) === '') {
+            $updateType->execute(['', $product['product_id']]);
+            continue;
+        }
+        $type = save_product_type_option($pdo, $product['product_type']);
+        $updateType->execute([$type['type_name'], $product['product_id']]);
+    }
     refresh_product_vehicle_names($pdo);
     sync_feature_matches_for_catalog($pdo);
     $pdo->commit();
-    echo "Recommendation schema, compatibility records and matches updated.\n";
+    echo "Recommendation schema, product types, compatibility records and matches updated.\n";
 } catch (Throwable $exception) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     fwrite(STDERR, $exception->getMessage() . "\n");

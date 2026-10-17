@@ -20,8 +20,7 @@ $formPrefix = $formPrefix ?? '';
         <input type="text" id="<?php echo h($formPrefix . 'brand'); ?>" name="brand" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
     </div>
     <div>
-        <label class="mb-1 block text-sm font-medium dark:text-gray-200">Product Type</label>
-        <input type="text" id="<?php echo h($formPrefix . 'product_type'); ?>" name="product_type" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        <?php $pickerKind = 'type'; include __DIR__ . '/../includes/catalog_picker_fields.php'; ?>
     </div>
     <div class="md:col-span-2">
         <label class="mb-1 block text-sm font-medium dark:text-gray-200">Specification</label>
@@ -44,28 +43,8 @@ $formPrefix = $formPrefix ?? '';
             </div>
         </fieldset>
     </div>
-    <div class="md:col-span-2" data-vehicle-picker data-create-url="<?php echo h(app_url('pages/vehicle_create.php')); ?>">
-        <label for="<?php echo h($formPrefix . 'vehicle_ids'); ?>" class="mb-1 block text-sm font-medium dark:text-gray-200">Compatibility</label>
-        <select multiple size="5" id="<?php echo h($formPrefix . 'vehicle_ids'); ?>" name="vehicle_ids[]" aria-describedby="<?php echo h($formPrefix . 'vehicle_help'); ?>" class="w-full rounded border px-3 py-2 dark:bg-gray-700 dark:text-white">
-            <?php foreach ($vehicleOptions as $vehicle): ?>
-                <option value="<?php echo (int) $vehicle['vehicle_id']; ?>" data-active="<?php echo $vehicle['is_active'] ? '1' : '0'; ?>" data-name="<?php echo h($vehicle['vehicle_name']); ?>" data-search="<?php echo h($vehicle['search_names']); ?>" <?php echo $vehicle['is_active'] ? '' : 'disabled'; ?>><?php echo h($vehicle['vehicle_name'] . ($vehicle['is_active'] ? '' : ' (archived; existing assignments only)')); ?></option>
-            <?php endforeach; ?>
-        </select>
-        <div data-vehicle-controls hidden>
-            <label for="<?php echo h($formPrefix . 'vehicle_search'); ?>" class="sr-only">Search compatible vehicles</label>
-            <input type="search" id="<?php echo h($formPrefix . 'vehicle_search'); ?>" data-vehicle-search placeholder="Search vehicle name or alias..." autocomplete="off" class="mb-2 w-full rounded border px-3 py-2 dark:bg-gray-700">
-            <div data-vehicle-list class="max-h-40 overflow-auto rounded border p-2 dark:border-gray-600" role="group" aria-label="Compatible vehicles"></div>
-            <details class="mt-2">
-                <summary class="cursor-pointer text-sm underline">Add New Vehicle</summary>
-                <div class="mt-2 flex flex-wrap gap-2">
-                    <label for="<?php echo h($formPrefix . 'new_vehicle_name'); ?>" class="sr-only">New vehicle name</label>
-                    <input id="<?php echo h($formPrefix . 'new_vehicle_name'); ?>" data-new-vehicle maxlength="100" placeholder="New vehicle name" class="min-w-0 flex-1 rounded border px-3 py-2 dark:bg-gray-700">
-                    <button type="button" data-create-vehicle class="rounded border px-3 py-2 text-sm">Add and Select</button>
-                </div>
-            </details>
-            <p data-vehicle-status role="status" aria-live="polite" class="mt-2 text-sm"></p>
-        </div>
-        <p id="<?php echo h($formPrefix . 'vehicle_help'); ?>" class="mt-1 text-xs text-gray-500">Select compatible vehicles (Ctrl/Cmd to select multiple), or Universal alone. Manage names and aliases using Manage Compatibility. Leave empty only when compatibility is unknown; such products will not be recommended.</p>
+    <div class="md:col-span-2">
+        <?php $pickerKind = 'vehicle'; include __DIR__ . '/../includes/catalog_picker_fields.php'; ?>
     </div>
     <div>
         <label class="mb-1 block text-sm font-medium dark:text-gray-200">Manufacturing Date</label>

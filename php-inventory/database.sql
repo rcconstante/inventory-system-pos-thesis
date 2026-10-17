@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS Vehicle_Compatibility (
     is_active TINYINT(1) NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS Product_Type (
+    type_id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    type_key VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS Recommendation_State (
     state_id TINYINT PRIMARY KEY,
     algorithm_version INT NOT NULL
