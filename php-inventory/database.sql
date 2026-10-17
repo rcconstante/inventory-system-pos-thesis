@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS Product_Type (
     type_key VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS Schema_Migration (
+    migration_id VARCHAR(100) PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS Recommendation_State (
     state_id TINYINT PRIMARY KEY,
     algorithm_version INT NOT NULL

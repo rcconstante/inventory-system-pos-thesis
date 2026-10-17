@@ -132,13 +132,17 @@ The system compares products using five weighted features to suggest alternative
 
 ### Upgrade an existing installation
 
-This update **requires a migration** for structured fitment and standardized compatibility. Back up the database and pause writes, pull the code, then run from `php-inventory` with the same `INVENTORY_DB_HOST`, optional `INVENTORY_DB_PORT` (default 3306), `INVENTORY_DB_NAME`, `INVENTORY_DB_USER` and `INVENTORY_DB_PASS` configuration as the app:
+Database upgrades now run **automatically once when an active administrator signs in and opens the updated system**. Back up the database, pull the code, then open the dashboard or Inventory as admin. No terminal migration command is needed. The database account needs permission to create/alter the required tables as well as read/write application data.
+
+The app records completion in `Schema_Migration`, checks the authenticated account's current admin role, and uses a database advisory lock to prevent simultaneous upgrades. Staff and cashiers see a pending-update message until an admin completes the upgrade. Login remains available throughout. Failed imports roll back their data changes and leave the upgrade pending for retry; schema changes already committed by MySQL remain safe to reuse. HTTP errors show a concise message and detailed failures go to server logs. API requests receive JSON errors.
+
+For deployment scripts or troubleshooting, the same versioned upgrade is still available as an optional CLI command from `php-inventory`, using the app's `INVENTORY_DB_HOST`, optional `INVENTORY_DB_PORT` (default 3306), `INVENTORY_DB_NAME`, `INVENTORY_DB_USER` and `INVENTORY_DB_PASS` configuration:
 
 ```sh
 php migrations/recommendation-fitment.php
 ```
 
-The CLI-only migration adds `Products.essential_fitment`, creates `Vehicle_Compatibility`, `Vehicle_Alias`, `Product_Vehicle`, `Product_Type` and `Recommendation_State`, imports existing compatibility values and product types, consolidates spacing/punctuation variants, and rebuilds recommendations. The state record tracks the algorithm version so an empty valid match cache is not recalculated on every read. It is safe to rerun and does not delete products, sales or batches. MySQL schema changes commit independently; a failed data import rolls back its data transaction and can be rerun after correcting the reported value. Fresh installations import the updated `database.sql`; the migration may still be run to initialize compatibility and product types from existing data.
+The shared upgrade adds `Products.essential_fitment`, creates `Vehicle_Compatibility`, `Vehicle_Alias`, `Product_Vehicle`, `Product_Type`, `Recommendation_State` and `Schema_Migration`, imports existing compatibility values and product types, consolidates spacing/punctuation variants, and rebuilds recommendations. Completed upgrades skip data import on subsequent page loads and CLI runs. The recommendation state record also prevents empty match caches from being recalculated on every read. Products, sales and batches are preserved. Fresh installations import the updated `database.sql`; the first admin visit initializes the catalogs and completion marker.
 
 After migration, use Manage Compatibility to merge misspelled duplicate models, then enter essential fitment for products that require it. Existing tire descriptions with a recognizable size work immediately. Do not re-import `database.sql` over an existing installation.
 
@@ -148,9 +152,11 @@ Add and Edit Product provide a **Product Type (select one)** dropdown with searc
 
 Use **Duplicate** beside a product to prefill a new Add Product form with its category, brand, description, product type, prices, fitment, reorder level and active compatibility selections. Review the generated `(Copy)` name before saving. Quantity starts at zero; manufacturing and expiration dates are cleared. Existing inventory, batches, sales and product identifiers are never copied. No product is created until the user submits the form.
 
-The Product Type dropdown adds a persistent `Product_Type` catalog. **Run `php migrations/recommendation-fitment.php` again after pulling this selector update**, even if the earlier compatibility migration was already applied. Existing product types are imported automatically. No products or stock history need to be re-entered.
+The Product Type dropdown uses the persistent `Product_Type` catalog. The automatic upgrade imports existing types, including installations that previously ran the manual migration. No products or stock history need to be re-entered.
 
 Run unit checks with `php tests/recommendations.php`. For database integration checks, enable PDO MySQL and set `INVENTORY_TEST_DB_DSN` (e.g. `mysql:host=127.0.0.1;port=3306;charset=utf8mb4`, without `dbname`), `INVENTORY_TEST_DB_USER`, and `INVENTORY_TEST_DB_PASS` for a disposable local MySQL/MariaDB server. Run `php tests/recommendations.php` and `php tests/recommendation_http.php`. Each creates a uniquely named database and drops only that database afterward. The HTTP suite starts and stops an isolated PHP server and exercises migration reruns, login, POS, fitment edits, compatibility merges, product archival, CSRF and cashier access. Use PHP 8.1+.
+
+Run `php tests/database_upgrades.php` to verify upgrade locking, rollback, retry and one-time execution. Set `INVENTORY_TEST_AUTOMATIC_UPGRADE=1` when running `tests/recommendation_http.php` to test the automatic admin path without invoking the CLI migration, including non-admin blocking, failed-upgrade responses and retry.
 
 ### Example
 

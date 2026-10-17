@@ -55,7 +55,7 @@ try {
     $pdo->exec("INSERT INTO Stock_Batch (product_id, batch_number, quantity_received, quantity_remaining) VALUES (2, 'PLUS', 10, 10), (3, 'ALPHA', 10, 10)");
     // Exercise upgrade from the previous schema, then repeat it to prove idempotency.
     $pdo->exec('ALTER TABLE Products DROP COLUMN essential_fitment');
-    $pdo->exec('DROP TABLE Product_Vehicle, Vehicle_Alias, Vehicle_Compatibility, Recommendation_State, Product_Type');
+    $pdo->exec('DROP TABLE Product_Vehicle, Vehicle_Alias, Vehicle_Compatibility, Recommendation_State, Product_Type, Schema_Migration');
     preg_match('/host=([^;]+)/', $dsn, $host);
     preg_match('/port=(\d+)/', $dsn, $port);
     $env = array_merge(getenv(), [
@@ -63,16 +63,14 @@ try {
         'INVENTORY_DB_NAME' => $database, 'INVENTORY_DB_USER' => $user, 'INVENTORY_DB_PASS' => $password,
     ]);
     $phpCommand = [PHP_BINARY, '-d', 'extension_dir=' . ini_get('extension_dir'), '-d', 'extension=pdo_mysql'];
-    for ($run = 0; $run < 2; $run++) {
+    $automaticUpgrade = getenv('INVENTORY_TEST_AUTOMATIC_UPGRADE') === '1';
+    for ($run = 0; !$automaticUpgrade && $run < 2; $run++) {
         $pipes = [];
         $migration = proc_open(array_merge($phpCommand, [__DIR__ . '/../migrations/recommendation-fitment.php']), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, __DIR__, $env);
         fclose($pipes[0]); $output = stream_get_contents($pipes[1]); $error = stream_get_contents($pipes[2]);
         fclose($pipes[1]); fclose($pipes[2]);
         verify_http(proc_close($migration) === 0, 'Migration failed: ' . $error . $output);
     }
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 2, 'Migration must consolidate formatting variants without guessing typos.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle')->fetchColumn() === 3, 'Migration must preserve all assignments across reruns.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === 1 && $pdo->query('SELECT product_type FROM Products WHERE product_id = 2')->fetchColumn() === 'Tire', 'Migration must consolidate existing product types and preserve canonical values.');
     $socket = stream_socket_server('tcp://127.0.0.1:0');
     $address = stream_socket_get_name($socket, false); fclose($socket);
     $server = proc_open(array_merge($phpCommand, ['-S', $address, '-t', dirname(__DIR__, 2)]), [0 => ['pipe', 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, dirname(__DIR__), $env);
@@ -86,10 +84,32 @@ try {
     }
     [$status, $login] = http_request($base, 'login.php', $cookies);
     verify_http($status === 200, 'Login must render.');
+    if ($automaticUpgrade) {
+        $pendingCookies = [];
+        [, $pendingLogin] = http_request($base, 'login.php', $pendingCookies);
+        http_request($base, 'login.php', $pendingCookies, ['csrf_token' => http_csrf($pendingLogin), 'email' => 'http-cashier', 'password' => 'local-test-only']);
+        [$pendingStatus, $pendingBody] = http_request($base, 'pages/pos.php', $pendingCookies);
+        verify_http($pendingStatus === 503 && str_contains($pendingBody, 'administrator'), 'Cashier must see a clear pending-upgrade response.');
+        verify_http((int) $pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Schema_Migration'")->fetchColumn() === 0, 'Non-admin requests must not create migration tables or run the upgrade.');
+    }
     [$status] = http_request($base, 'login.php', $cookies, ['csrf_token' => http_csrf($login), 'email' => 'http-admin', 'password' => 'local-test-only']);
     verify_http($status === 302, 'Admin login must succeed.');
+    if ($automaticUpgrade) {
+        $pdo->prepare('UPDATE Products SET compatibility = ? WHERE product_id = 3')->execute([str_repeat('x', 101)]);
+        [$failureStatus, $failureBody] = http_request($base, 'pages/products.php', $cookies);
+        verify_http($failureStatus === 503 && str_contains($failureBody, 'could not finish') && !str_contains($failureBody, 'SQLSTATE'), 'Failed automatic upgrade must show a safe, actionable response.');
+        verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 0, 'Failed automatic upgrade must remain pending.');
+        [$failureStatus, $failureJson] = http_request($base, 'pages/vehicle_create.php', $cookies, ['csrf_token' => http_csrf($login), 'vehicle_name' => 'Should not be created']);
+        // Login regenerates the session but retains its CSRF token.
+        verify_http($failureStatus === 503 && isset(json_decode($failureJson, true)['error']), 'Inline APIs must return JSON while the upgrade is unavailable.');
+        $pdo->exec("UPDATE Products SET compatibility = 'Honda Clik 125' WHERE product_id = 3");
+    }
     [$status, $inventory] = http_request($base, 'pages/products.php', $cookies);
     verify_http($status === 200 && str_contains($inventory, 'Manage Compatibility') && str_contains($inventory, 'name="vehicle_ids[]"'), 'Inventory must render new controls.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 2, 'Migration must consolidate formatting variants without guessing typos.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle')->fetchColumn() === 3, 'Migration must preserve all assignments across reruns.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === 1 && $pdo->query('SELECT product_type FROM Products WHERE product_id = 2')->fetchColumn() === 'Tire', 'Migration must consolidate existing product types and preserve canonical values.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 1, 'Upgrade must record completion once.');
     verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && str_contains($inventory, 'openDuplicateProductModal(this)'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
     $inlineToken = http_csrf($inventory);
     [$status, $typeBody] = http_request($base, 'pages/product_type_create.php', $cookies, ['csrf_token' => $inlineToken, 'type_name' => 'Oil Filter']);

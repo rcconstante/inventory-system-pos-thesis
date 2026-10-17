@@ -23,3 +23,9 @@ try {
     http_response_code(500);
     exit('A database connection error occurred. Please check the configuration and try again.');
 }
+
+if (PHP_SAPI !== 'cli' && function_exists('is_logged_in') && is_logged_in()
+    && basename($_SERVER['SCRIPT_FILENAME'] ?? '') !== 'login.php') {
+    require_once __DIR__ . '/database_upgrades.php';
+    ensure_inventory_database_ready($pdo);
+}
