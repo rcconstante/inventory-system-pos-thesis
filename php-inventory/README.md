@@ -142,6 +142,14 @@ The CLI-only migration adds `Products.essential_fitment`, creates `Vehicle_Compa
 
 After migration, use Manage Compatibility to merge misspelled duplicate models, then enter essential fitment for products that require it. Existing tire descriptions with a recognizable size work immediately. Do not re-import `database.sql` over an existing installation.
 
+### Faster product entry
+
+Add and Edit Product provide searchable compatibility checkboxes (including known aliases). Select vehicles without Ctrl/Cmd. Use **Add New Vehicle → Add and Select** to save a reusable vehicle while keeping the product form open. Existing names/aliases reuse the existing active record; archived records require restoration in Manage Compatibility. Inline creation enforces catalog permissions, CSRF validation, bounded input and request limits. The saved vehicle remains available even if the product form is canceled.
+
+Use **Duplicate** beside a product to prefill a new Add Product form with its category, brand, description, product type, prices, fitment, reorder level and active compatibility selections. Review the generated `(Copy)` name before saving. Quantity starts at zero; manufacturing and expiration dates are cleared. Existing inventory, batches, sales and product identifiers are never copied. No product is created until the user submits the form.
+
+These faster-entry controls use the existing recommendation schema and require no additional migration after `recommendation-fitment.php` has been applied.
+
 Run unit checks with `php tests/recommendations.php`. For database integration checks, enable PDO MySQL and set `INVENTORY_TEST_DB_DSN` (e.g. `mysql:host=127.0.0.1;port=3306;charset=utf8mb4`, without `dbname`), `INVENTORY_TEST_DB_USER`, and `INVENTORY_TEST_DB_PASS` for a disposable local MySQL/MariaDB server. Run `php tests/recommendations.php` and `php tests/recommendation_http.php`. Each creates a uniquely named database and drops only that database afterward. The HTTP suite starts and stops an isolated PHP server and exercises migration reruns, login, POS, fitment edits, compatibility merges, product archival, CSRF and cashier access. Use PHP 8.1+.
 
 ### Example

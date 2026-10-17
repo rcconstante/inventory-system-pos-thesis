@@ -84,7 +84,14 @@ function essential_fitment_matches(array $source, array $candidate): bool
 
 function fetch_vehicle_options(PDO $pdo): array
 {
-    return $pdo->query('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility ORDER BY vehicle_name, vehicle_id')->fetchAll(PDO::FETCH_ASSOC);
+    $vehicles = $pdo->query('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility ORDER BY vehicle_name, vehicle_id')->fetchAll(PDO::FETCH_ASSOC);
+    $aliases = [];
+    foreach ($pdo->query('SELECT vehicle_id, alias_key FROM Vehicle_Alias')->fetchAll(PDO::FETCH_ASSOC) as $alias) {
+        $aliases[(int) $alias['vehicle_id']][] = $alias['alias_key'];
+    }
+    foreach ($vehicles as &$vehicle) $vehicle['search_names'] = implode(' ', $aliases[(int) $vehicle['vehicle_id']] ?? []);
+    unset($vehicle);
+    return $vehicles;
 }
 
 function refresh_product_vehicle_names(PDO $pdo): void
@@ -126,6 +133,7 @@ function save_product_vehicles(PDO $pdo, int $productId, mixed $input): void
 
 function save_vehicle_option(PDO $pdo, ?int $id, string $name, string $aliases): int
 {
+    $isEdit = $id !== null;
     if (strlen($aliases) > 4000) throw new RuntimeException('Vehicle aliases are too long.');
     $name = trim(preg_replace('/\s+/', ' ', $name) ?? $name);
     if ($name === '' || strlen($name) > 100 || str_contains($name, ',') || vehicle_name_key($name) === '') throw new RuntimeException('Use a vehicle name of up to 100 characters without commas.');
@@ -158,7 +166,7 @@ function save_vehicle_option(PDO $pdo, ?int $id, string $name, string $aliases):
     $pdo->prepare('DELETE FROM Vehicle_Alias WHERE vehicle_id = ?')->execute([$id]);
     $insert = $pdo->prepare('INSERT INTO Vehicle_Alias (alias_key, vehicle_id) VALUES (?, ?)');
     foreach (array_keys($keys) as $key) $insert->execute([$key, $id]);
-    refresh_product_vehicle_names($pdo);
+    if ($isEdit) refresh_product_vehicle_names($pdo);
     return $id;
 }
 

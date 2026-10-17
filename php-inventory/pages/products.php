@@ -505,7 +505,7 @@ include '../includes/header.php';
 
     <?php if ($canManage): ?>
         <a href="<?php echo h(app_url('pages/compatibility.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Manage Compatibility</a>
-        <button type="button" onclick="toggleProductModal('addProductModal', true)" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
+        <button type="button" onclick="openNewProductModal()" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
     <?php endif; ?>
@@ -587,6 +587,7 @@ include '../includes/header.php';
                                     onclick="openEditProductModal(this)">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                                 </button>
+                                <button type="button" onclick="openDuplicateProductModal(this)" class="rounded border px-2 py-1 text-xs" title="Copy details into a new product">Duplicate</button>
                                 <?php if ($canDelete): ?>
                                 <button type="button" title="Archive" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
                                     data-product-id="<?php echo $productId; ?>"
@@ -635,6 +636,7 @@ include '../includes/header.php';
     <div id="addProductModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
         <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white dark:bg-gray-800 p-8 shadow-xl dark:text-gray-100">
             <h2 class="text-xl font-bold mb-6">ADD PRODUCT</h2>
+            <p id="duplicateProductNotice" role="status" class="mb-4 text-sm" hidden>Review the copied details before saving. Quantity is zero and batch dates are cleared. Saving creates a separate product.</p>
             <form method="POST" action="<?php echo h(app_url('pages/products.php')); ?>">
                 <?php echo csrf_field(); ?>
                 <?php $formPrefix = ''; include __DIR__ . '/product_form_fields.php'; ?>
@@ -847,30 +849,48 @@ include '../includes/header.php';
         return (text || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    function openEditProductModal(button) {
-        document.getElementById('edit_product_id').value = button.dataset.productId || '';
-        document.getElementById('edit_product_name').value = button.dataset.productName || '';
-        document.getElementById('edit_category_id').value = button.dataset.categoryId || '';
-        document.getElementById('edit_brand').value = button.dataset.brand || '';
-        document.getElementById('edit_description').value = button.dataset.description || '';
-        document.getElementById('edit_price').value = button.dataset.price || '';
-        document.getElementById('edit_retail_price').value = button.dataset.retailPrice || '';
-        document.getElementById('edit_acquisition_cost').value = button.dataset.acquisitionCost || '';
-        document.getElementById('edit_manufacturing_date').value = button.dataset.manufacturingDate || '';
-        document.getElementById('edit_product_type').value = button.dataset.productType || '';
-        document.getElementById('edit_specification').value = button.dataset.specification || '';
-        var fitment = JSON.parse(button.dataset.essentialFitment || '{}');
-        document.querySelectorAll('[id^="edit_fitment_"]').forEach(function(input) {
+    function fillProductForm(prefix, data, duplicate) {
+        ['product_name', 'category_id', 'brand', 'description', 'price', 'retail_price', 'acquisition_cost', 'product_type', 'specification', 'min_stock_level'].forEach(function(field) {
+            var key = field.replace(/_([a-z])/g, function(match, letter) { return letter.toUpperCase(); });
+            document.getElementById(prefix + field).value = data[key] || '';
+        });
+        if (!duplicate) document.getElementById('edit_product_id').value = data.productId;
+        else document.getElementById('product_name').value = (data.productName || '').slice(0, 143) + ' (Copy)';
+        var fitment;
+        try { fitment = JSON.parse(data.essentialFitment || '{}'); } catch (error) { fitment = {}; }
+        document.querySelectorAll('[id^="' + prefix + 'fitment_"]').forEach(function(input) {
             input.value = fitment[input.dataset.fitmentKey] || '';
         });
-        var vehicleNames = (button.dataset.compatibility || '').split(',').map(function(name) { return name.trim(); });
-        Array.from(document.getElementById('edit_vehicle_ids').options).forEach(function(option) {
-            option.selected = vehicleNames.includes(option.dataset.name);
+        var vehicleNames = (data.compatibility || '').split(',').map(function(name) { return name.trim(); });
+        var vehicles = document.getElementById(prefix + 'vehicle_ids');
+        Array.from(vehicles.options).forEach(function(option) {
+            option.selected = vehicleNames.includes(option.dataset.name) && (!duplicate || option.dataset.active === '1');
             option.disabled = option.dataset.active === '0' && !option.selected;
         });
-        document.getElementById('edit_current_stock').value = button.dataset.currentStock || '';
-        document.getElementById('edit_min_stock_level').value = button.dataset.minStockLevel || '';
-        document.getElementById('edit_expiry_date').value = button.dataset.expiryDate || '';
+        vehicles.dispatchEvent(new Event('vehicle-selection-change'));
+        document.getElementById(prefix + 'current_stock').value = duplicate ? '0' : data.currentStock || '0';
+        document.getElementById(prefix + 'manufacturing_date').value = duplicate ? '' : data.manufacturingDate || '';
+        document.getElementById(prefix + 'expiry_date').value = duplicate ? '' : data.expiryDate || '';
+    }
+
+    function openNewProductModal() {
+        document.querySelector('#addProductModal form').reset();
+        document.getElementById('duplicateProductNotice').hidden = true;
+        document.getElementById('current_stock').value = '0';
+        document.getElementById('min_stock_level').value = '0';
+        toggleProductModal('addProductModal', true);
+    }
+
+    function openDuplicateProductModal(button) {
+        var source = button.parentElement.querySelector('[data-product-name]');
+        if (!source) return;
+        openNewProductModal();
+        fillProductForm('', source.dataset, true);
+        document.getElementById('duplicateProductNotice').hidden = false;
+    }
+
+    function openEditProductModal(button) {
+        fillProductForm('edit_', button.dataset, false);
         toggleProductModal('editProductModal', true);
     }
 
@@ -1146,4 +1166,5 @@ include '../includes/header.php';
     })();
 </script>
 
+<script src="<?php echo h(app_url('assets/vehicle-picker.js')); ?>" defer></script>
 <?php include '../includes/footer.php'; ?>
