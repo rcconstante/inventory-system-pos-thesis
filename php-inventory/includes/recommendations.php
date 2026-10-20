@@ -20,7 +20,7 @@ function save_product_type_option(PDO $pdo, string $name): array
 function resolve_product_type(PDO $pdo, string $name): string
 {
     if ($name === '') return '';
-    $lookup = $pdo->prepare('SELECT type_name FROM Product_Type WHERE type_key = ?');
+    $lookup = $pdo->prepare('SELECT type_name FROM Product_Type WHERE type_key = ? FOR UPDATE');
     $lookup->execute([vehicle_name_key($name)]);
     $canonical = $lookup->fetchColumn();
     if ($canonical === false) throw new RuntimeException('Select an existing product type, or add the new type first.');
@@ -108,14 +108,15 @@ function fetch_vehicle_options(PDO $pdo): array
 {
     return $pdo->query('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility ORDER BY vehicle_name, vehicle_id')->fetchAll(PDO::FETCH_ASSOC);
 }
-function refresh_product_vehicle_names(PDO $pdo): void
+function refresh_product_vehicle_names(PDO $pdo, ?int $vehicleId = null): void
 {
     $pdo->exec('SET SESSION group_concat_max_len = 65535');
-    $pdo->exec("UPDATE Products p SET compatibility = COALESCE((
+    $statement = $pdo->prepare("UPDATE Products p SET compatibility = COALESCE((
         SELECT GROUP_CONCAT(v.vehicle_name ORDER BY v.vehicle_name SEPARATOR ', ')
         FROM Product_Vehicle pv JOIN Vehicle_Compatibility v ON v.vehicle_id = pv.vehicle_id
         WHERE pv.product_id = p.product_id
-    ), '')");
+    ), '')" . ($vehicleId === null ? '' : ' WHERE p.product_id IN (SELECT product_id FROM Product_Vehicle WHERE vehicle_id = ?)'));
+    $statement->execute($vehicleId === null ? [] : [$vehicleId]);
 }
 
 function save_product_vehicles(PDO $pdo, int $productId, mixed $input): void
@@ -168,8 +169,46 @@ function save_vehicle_option(PDO $pdo, ?int $id, string $name): int
     }
     $pdo->prepare('DELETE FROM Vehicle_Alias WHERE vehicle_id = ?')->execute([$id]);
     $pdo->prepare('INSERT INTO Vehicle_Alias (alias_key, vehicle_id) VALUES (?, ?)')->execute([$key, $id]);
-    if ($isEdit) refresh_product_vehicle_names($pdo);
+    if ($isEdit) refresh_product_vehicle_names($pdo, $id);
     return $id;
+}
+
+function update_product_type_option(PDO $pdo, int $id, string $name): void
+{
+    $name = trim(preg_replace('/\s+/', ' ', $name) ?? $name);
+    $key = vehicle_name_key($name);
+    if ($name === '' || strlen($name) > 50 || $key === '' || str_contains($name, ',')) throw new RuntimeException('Enter one product type of up to 50 characters without commas.');
+    $statement = $pdo->prepare('SELECT type_name FROM Product_Type WHERE type_id = ? FOR UPDATE');
+    $statement->execute([$id]);
+    $previous = $statement->fetchColumn();
+    if ($previous === false) throw new RuntimeException('Product type not found. Refresh the page.');
+    $duplicate = $pdo->prepare('SELECT type_id FROM Product_Type WHERE type_key = ? AND type_id <> ?');
+    $duplicate->execute([$key, $id]);
+    if ($duplicate->fetchColumn() !== false) throw new RuntimeException('That product type already exists.');
+    $pdo->prepare('UPDATE Product_Type SET type_name = ?, type_key = ? WHERE type_id = ?')->execute([$name, $key, $id]);
+    $pdo->prepare('UPDATE Products SET product_type = ? WHERE product_type = ?')->execute([$name, $previous]);
+}
+
+function delete_product_option(PDO $pdo, string $kind, int $id): void
+{
+    if ($kind === 'type') {
+        $lock = $pdo->prepare('SELECT type_name FROM Product_Type WHERE type_id = ? FOR UPDATE');
+        $lock->execute([$id]);
+        $name = $lock->fetchColumn();
+        if ($name === false) throw new RuntimeException('Product type not found. Refresh the page.');
+        $used = $pdo->prepare('SELECT product_id FROM Products WHERE product_type = ? LIMIT 1 FOR UPDATE');
+        $used->execute([$name]);
+        if ($used->fetchColumn() !== false) throw new RuntimeException('This product type is used by products and cannot be deleted.');
+        $pdo->prepare('DELETE FROM Product_Type WHERE type_id = ?')->execute([$id]);
+    } elseif ($kind === 'vehicle') {
+        $lock = $pdo->prepare('SELECT vehicle_id FROM Vehicle_Compatibility WHERE vehicle_id = ? FOR UPDATE');
+        $lock->execute([$id]);
+        if ($lock->fetchColumn() === false) throw new RuntimeException('Compatibility entry not found. Refresh the page.');
+        $used = $pdo->prepare('SELECT product_id FROM Product_Vehicle WHERE vehicle_id = ? LIMIT 1 FOR UPDATE');
+        $used->execute([$id]);
+        if ($used->fetchColumn() !== false) throw new RuntimeException('This compatibility entry is used by products and cannot be deleted.');
+        $pdo->prepare('DELETE FROM Vehicle_Compatibility WHERE vehicle_id = ?')->execute([$id]);
+    } else throw new RuntimeException('Invalid product option.');
 }
 function find_pos_recommendation_sources(PDO $pdo, string $term, int $categoryId): array
 {

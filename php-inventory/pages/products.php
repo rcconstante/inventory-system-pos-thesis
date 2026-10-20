@@ -71,9 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $categoryStatement = $pdo->prepare('SELECT category_id FROM Category WHERE category_id = ?');
             $categoryStatement->execute([$categoryId]);
             if (!$categoryStatement->fetchColumn()) throw new RuntimeException('The selected category does not exist.');
-            $productType = resolve_product_type($pdo, $productType);
 
             $pdo->beginTransaction();
+            $productType = resolve_product_type($pdo, $productType);
 
             if ($productId === null) {
                 $insertProduct = $pdo->prepare(
@@ -507,7 +507,7 @@ include '../includes/header.php';
 
     <?php if ($canManage): ?>
         <a href="<?php echo h(app_url('pages/product_archives.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Archived Products</a>
-        <a href="<?php echo h(app_url('pages/compatibility.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Manage Compatibility</a>
+        <a href="<?php echo h(app_url('pages/product_options.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Manage Product Options</a>
         <button type="button" onclick="openNewProductModal()" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
