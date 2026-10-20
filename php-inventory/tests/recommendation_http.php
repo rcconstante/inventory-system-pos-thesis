@@ -137,12 +137,25 @@ try {
     $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 1 WHERE vehicle_id = ?')->execute([$inlineVehicle['vehicle_id']]);
     [$status] = http_request($base, 'pages/compatibility.php', $cookies);
     verify_http($status === 302, 'Old compatibility bookmarks must redirect to product options.');
-    [$status, $manager] = http_request($base, 'pages/product_options.php', $cookies);
-    verify_http($status === 200 && str_contains($manager, 'Product Type') && str_contains($manager, '+ Add Model') && !str_contains($manager, 'merge_vehicle') && !str_contains($manager, 'name="aliases"') && !str_contains($manager, 'Vehicle Compatibility'), 'Combined manager must render simple compatibility and product type controls.');
+    [$status] = http_request($base, 'pages/product_options.php', $cookies);
+    verify_http($status === 302, 'Product options URLs must redirect to the inventory modal.');
+    [$status, $manager] = http_request($base, 'pages/products.php?open_options=1', $cookies);
+    verify_http($status === 200 && str_contains($manager, 'id="productOptionsDialog"') && str_contains($manager, 'id="openProductOptions"') && str_contains($manager, 'Product Type') && str_contains($manager, '+ Add Model') && !str_contains($manager, 'merge_vehicle') && !str_contains($manager, 'name="aliases"') && !str_contains($manager, 'Vehicle Compatibility'), 'Combined manager must render simple compatibility and product type controls.');
+    verify_http(str_contains($manager, 'aria-label="Delete Tire"') && !str_contains($manager, '$compatibility =') && !str_contains($manager, 'Warning:'), 'Modal must render real catalog rows without source leakage or runtime warnings.');
+    [$filterStatus, $filterPage] = http_request($base, 'pages/products.php?search[]=bad&category_id[]=bad&page[]=bad', $cookies);
+    verify_http($filterStatus === 200 && !str_contains($filterPage, 'Warning:'), 'Malformed inventory filters must not crash or emit warnings.');
     $optionToken = http_csrf($manager);
     $optionRequest = static function (string $kind, string $action, int $id = 0, string $name = '') use ($base, &$cookies, $optionToken): void {
         http_request($base, 'pages/product_options.php', $cookies, ['csrf_token' => $optionToken, 'option_kind' => $kind, 'action' => $action, 'option_id' => $id, 'option_name' => $name]);
     };
+    $beforeMalformed = (int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn();
+    http_request($base, 'pages/product_options.php', $cookies, ['csrf_token' => $optionToken, 'option_kind' => ['type'], 'action' => 'add', 'option_name' => 'Invalid']);
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === $beforeMalformed, 'Malformed actions must be rejected without mutation or PHP errors.');
+    $optionRequest('type', 'add', 0, str_repeat('製', 40));
+    [$invalidNameStatus, $invalidNamePage] = http_request($base, 'pages/products.php?open_options=1', $cookies);
+    verify_http($invalidNameStatus === 200 && str_contains($invalidNamePage, 'up to 50 characters') && !str_contains($invalidNamePage, 'Fatal error'), 'Overlong multibyte names must show validation feedback without breaking the modal.');
+    $optionRequest('type', 'update', 999999, 'Missing');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === $beforeMalformed, 'Stale deleted options must fail safely.');
     $vehicleId = (int) $pdo->query("SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = 'hondaclick125'")->fetchColumn();
     $optionRequest('vehicle', 'update', $vehicleId, 'Honda Click 125i');
     verify_http($pdo->query('SELECT compatibility FROM Products WHERE product_id = 1')->fetchColumn() === 'Honda Click 125i', 'Compatibility corrections must update linked products.');
@@ -264,7 +277,7 @@ try {
     [, $categoryPage] = http_request($base, 'pages/category.php', $cookies);
     http_request($base, 'pages/category.php', $cookies, ['csrf_token' => http_csrf($categoryPage), 'delete_category' => '1', 'category_id' => '1']);
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Feature_Based_Match')->fetchColumn() === 0, 'Category deletion must rebuild and clear invalid matches.');
-    verify_http(!preg_match('/PHP (?:Fatal error|Warning|Parse error)/', file_get_contents($log)), 'HTTP pages must not emit PHP errors.');
+    verify_http(!preg_match('/(?:PHP )?(?:Fatal error|Warning|Parse error):/', file_get_contents($log)), 'HTTP pages must not emit PHP errors.');
     echo "Passed {$checks} HTTP and migration checks.\n";
 } finally {
     if (is_resource($server)) { proc_terminate($server); proc_close($server); }

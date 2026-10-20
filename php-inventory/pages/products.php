@@ -336,8 +336,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $categoriesStatement = $pdo->query('SELECT * FROM Category ORDER BY category_name ASC');
 $categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
 
-$selectedCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
-$searchTerm = trim((string) ($_GET['search'] ?? ''));
+$selectedCategoryId = max(0, (int) filter_var($_GET['category_id'] ?? 0, FILTER_VALIDATE_INT));
+$searchTerm = is_string($_GET['search'] ?? null) ? trim(substr($_GET['search'], 0, 150)) : '';
 
 // Count total products for pagination
 $countQuery = "
@@ -371,7 +371,7 @@ $countStmt->execute();
 $totalProducts = (int) $countStmt->fetchColumn();
 
 $perPage = 10;
-$paginationPage = max(1, (int) ($_GET['page'] ?? 1));
+$paginationPage = max(1, (int) filter_var($_GET['page'] ?? 1, FILTER_VALIDATE_INT));
 $totalPages = max(1, (int) ceil($totalProducts / $perPage));
 if ($paginationPage > $totalPages) { $paginationPage = $totalPages; }
 $offset = ($paginationPage - 1) * $perPage;
@@ -486,12 +486,14 @@ try {
 $vehicleOptions = fetch_vehicle_options($pdo);
 $productTypeOptions = $pdo->query('SELECT type_id, type_name FROM Product_Type ORDER BY type_name, type_id')->fetchAll(PDO::FETCH_ASSOC);
 $page_title = 'INVENTORY';
+$page_stylesheet = 'assets/inventory.css';
+$page_body_class = 'inventory-page';
 include '../includes/header.php';
 ?>
 
 <div class="mb-6 flex flex-wrap items-center gap-4">
     <form id="inventoryFilterForm" method="GET" class="flex flex-1 flex-wrap items-center justify-center gap-4">
-        <select name="category_id" onchange="this.form.submit()" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
+        <select name="category_id" class="cursor-pointer rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 px-3 py-2 text-sm">
             <option value="0">All Categories</option>
             <?php foreach ($categories as $category): ?>
                 <option value="<?php echo h((string) $category['category_id']); ?>" <?php echo $selectedCategoryId === (int) $category['category_id'] ? 'selected' : ''; ?>>
@@ -507,19 +509,20 @@ include '../includes/header.php';
 
     <?php if ($canManage): ?>
         <a href="<?php echo h(app_url('pages/product_archives.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Archived Products</a>
-        <a href="<?php echo h(app_url('pages/product_options.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Manage Product Options</a>
+        <button type="button" id="openProductOptions" aria-haspopup="dialog" aria-controls="productOptionsDialog" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Manage Product Options</button>
         <button type="button" onclick="openNewProductModal()" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
         </button>
     <?php endif; ?>
 </div>
 
+<p id="inventorySearchError" role="alert" class="mb-4 hidden rounded border border-red-400 p-3 text-sm text-red-700 dark:text-red-300">Unable to update the product list. Please try your search again.</p>
 <div id="productsTableContainer" class="relative" data-products='<?php echo $productDataJson; ?>'>
     <div id="productsTableLoading" class="hidden absolute inset-0 bg-white/80 dark:bg-gray-900/80 flex items-center justify-center z-10 backdrop-blur-sm">
         <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-black dark:border-white"></div>
     </div>
     <div class="overflow-x-auto bg-white dark:bg-gray-800 mb-4">
-        <table class="w-full border-collapse border border-black dark:border-gray-600 text-sm">
+        <table class="w-full min-w-[760px] border-collapse border border-black dark:border-gray-600 text-sm">
         <thead>
             <tr class="text-sm font-bold uppercase text-gray-700 dark:text-gray-300">
                 <th class="border border-black dark:border-gray-600 p-4 w-[100px] text-center">PRODUCT ID</th>
@@ -690,6 +693,8 @@ include '../includes/header.php';
     <?php endif; ?>
 <?php endif; ?>
 
+<?php if ($canManage) include '../includes/product_options_modal.php'; ?>
+
 <!-- Product Detail Modal -->
 <div id="productDetailModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4">
     <div class="w-full max-w-xl bg-white dark:bg-gray-800 border border-black dark:border-black shadow-lg flex flex-col" style="max-height:90vh;">
@@ -853,7 +858,7 @@ include '../includes/header.php';
     function fillProductForm(prefix, data) {
         ['product_name', 'category_id', 'brand', 'description', 'price', 'retail_price', 'acquisition_cost', 'product_type', 'specification', 'min_stock_level'].forEach(function(field) {
             var key = field.replace(/_([a-z])/g, function(match, letter) { return letter.toUpperCase(); });
-            document.getElementById(prefix + field).value = data[key] || '';
+            document.getElementById(prefix + field).value = data[key] ?? '';
         });
         document.getElementById(prefix + 'product_type').dispatchEvent(new Event('catalog-selection-change'));
         document.getElementById('edit_product_id').value = data.productId;
@@ -1049,6 +1054,8 @@ include '../includes/header.php';
         var container = document.getElementById('productsTableContainer');
         var filterForm = document.getElementById('inventoryFilterForm');
         var searchTimer = null;
+        var searchController = null;
+        var searchSequence = 0;
         if (!container || !filterForm) return;
 
         function setLoadingState(isLoading) {
@@ -1088,33 +1095,39 @@ include '../includes/header.php';
         }
 
         function fetchInventory(url, preserveScroll) {
+            var sequence = ++searchSequence;
+            if (searchController) searchController.abort();
+            searchController = new AbortController();
+            var controller = searchController;
+            var timeout = setTimeout(function() { controller.abort(); }, 15000);
+            var errorNotice = document.getElementById('inventorySearchError');
+            errorNotice.classList.add('hidden');
             setLoadingState(true);
-
-            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
                 .then(function(response) {
+                    if (sequence !== searchSequence) return null;
+                    if (response.redirected && new URL(response.url).pathname.endsWith('/login.php')) {
+                        window.location.href = response.url;
+                        return null;
+                    }
                     if (!response.ok) throw new Error('HTTP ' + response.status);
                     return response.text();
                 })
                 .then(function(html) {
+                    if (html === null || sequence !== searchSequence) return;
                     var doc = (new DOMParser()).parseFromString(html, 'text/html');
                     var newContainer = doc.getElementById('productsTableContainer');
-                    if (!newContainer) {
-                        window.location.href = url;
-                        return;
-                    }
-
+                    if (!newContainer) throw new Error('Invalid inventory response');
                     syncProductsTable(newContainer);
                     history.pushState({}, '', url);
-
-                    if (!preserveScroll) {
-                        window.scrollTo({ top: container.offsetTop - 20, behavior: 'smooth' });
-                    }
+                    if (!preserveScroll) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 })
                 .catch(function() {
-                    window.location.href = url;
+                    if (sequence === searchSequence) errorNotice.classList.remove('hidden');
                 })
                 .finally(function() {
-                    setLoadingState(false);
+                    clearTimeout(timeout);
+                    if (sequence === searchSequence) setLoadingState(false);
                 });
         }
 
@@ -1127,6 +1140,8 @@ include '../includes/header.php';
                 }
 
                 clearTimeout(searchTimer);
+                searchSequence++;
+                if (searchController) searchController.abort();
                 searchTimer = setTimeout(function() {
                     fetchInventory(buildInventoryUrl(filterForm), true);
                 }, 220);
@@ -1142,6 +1157,11 @@ include '../includes/header.php';
                 fetchInventory(buildInventoryUrl(filterForm), true);
             });
         }
+
+        filterForm.querySelector('[name="category_id"]').addEventListener('change', function() {
+            clearTimeout(searchTimer);
+            fetchInventory(buildInventoryUrl(filterForm), true);
+        });
 
         document.addEventListener('click', function(e) {
             var link = e.target.closest('a[href^="?"]');
@@ -1159,4 +1179,5 @@ include '../includes/header.php';
 </script>
 
 <script src="<?php echo h(app_url('assets/catalog-picker.js')); ?>" defer></script>
+<?php if ($canManage): ?><script src="<?php echo h(app_url('assets/product-options.js')); ?>" defer></script><?php endif; ?>
 <?php include '../includes/footer.php'; ?>
