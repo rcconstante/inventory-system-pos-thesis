@@ -23,7 +23,7 @@
 
         function updateSummary() {
             const names = Array.from(select.selectedOptions).filter((option) => option.value !== '').map((option) => option.dataset.name);
-            summary.textContent = names.length ? names[0] + (names.length > 1 ? ' +' + (names.length - 1) : '') : multiple ? 'Select compatible vehicles' : 'Select product type';
+            summary.textContent = names.length ? names[0] + (names.length > 1 ? ' +' + (names.length - 1) : '') : multiple ? 'Select compatibility' : 'Select product type';
             summary.title = names.join(', ');
         }
         function close(restoreFocus = true) {
@@ -48,7 +48,7 @@
             }
             const universal = key(option.dataset.name) === 'universal';
             if (checked && !universal && draft.size >= 30 && !draft.has(option.value)) {
-                status.textContent = 'Select up to 30 compatible vehicles.';
+                status.textContent = 'Select up to 30 compatible models.';
                 render();
                 return;
             }
@@ -62,7 +62,7 @@
         }
         function render() {
             const term = key(search.value);
-            const matches = Array.from(select.options).filter((option) => key(option.dataset.name).includes(term) || (option.dataset.search || '').includes(term));
+            const matches = Array.from(select.options).filter((option) => key(option.dataset.name).includes(term));
             list.replaceChildren();
             matches.forEach((option) => {
                 const label = document.createElement('label');
@@ -160,7 +160,7 @@
                 });
                 if (activeRequest) {
                     name.value = ''; search.value = '';
-                    status.textContent = multiple ? (draft.has(value) ? 'Model saved. Apply to use the updated selection.' : 'Model saved. Deselect a vehicle before selecting another.') : 'Product type saved and selected.';
+                    status.textContent = multiple ? (draft.has(value) ? 'Model saved. Apply to use the updated selection.' : 'Model saved. Deselect a model before selecting another.') : 'Product type saved and selected.';
                     render();
                 }
             } catch (error) {

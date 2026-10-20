@@ -50,7 +50,7 @@ try {
     $pdo->exec("INSERT INTO Products (product_id, product_name, price, category_id, product_type, specification, compatibility, brand) VALUES
         (1, 'Dunlop Front Tire', 100, 1, 'Tire', '80/90-14', 'Honda Click 125', 'Dunlop'),
         (2, 'Dunlop Front Tire Plus', 120, 1, ' tire ', 'Tubeless tire 80/90-14 extra grip', 'Honda Click-125', 'Dunlop'),
-        (3, 'Alpha alternative', 100, 1, 'Tire', '80/90-14 tubeless', 'Honda Clik 125', 'Dunlop')");
+        (3, 'Alpha alternative', 100, 1, 'Tire', '80/90-14 tubeless', 'Honda Click125', 'Dunlop')");
     $pdo->exec('INSERT INTO Inventory (product_id, current_stock) VALUES (1, 0), (2, 10), (3, 10)');
     $pdo->exec("INSERT INTO Stock_Batch (product_id, batch_number, quantity_received, quantity_remaining) VALUES (2, 'PLUS', 10, 10), (3, 'ALPHA', 10, 10)");
     // Exercise upgrade from the previous schema, then repeat it to prove idempotency.
@@ -102,15 +102,15 @@ try {
         [$failureStatus, $failureJson] = http_request($base, 'pages/vehicle_create.php', $cookies, ['csrf_token' => http_csrf($login), 'vehicle_name' => 'Should not be created']);
         // Login regenerates the session but retains its CSRF token.
         verify_http($failureStatus === 503 && isset(json_decode($failureJson, true)['error']), 'Inline APIs must return JSON while the upgrade is unavailable.');
-        $pdo->exec("UPDATE Products SET compatibility = 'Honda Clik 125' WHERE product_id = 3");
+        $pdo->exec("UPDATE Products SET compatibility = 'Honda Click125' WHERE product_id = 3");
     }
     [$status, $inventory] = http_request($base, 'pages/products.php', $cookies);
     verify_http($status === 200 && str_contains($inventory, 'Manage Compatibility') && str_contains($inventory, 'name="vehicle_ids[]"'), 'Inventory must render new controls.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 2, 'Migration must consolidate formatting variants without guessing typos.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 1, 'Migration must consolidate formatting variants.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle')->fetchColumn() === 3, 'Migration must preserve all assignments across reruns.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === 1 && $pdo->query('SELECT product_type FROM Products WHERE product_id = 2')->fetchColumn() === 'Tire', 'Migration must consolidate existing product types and preserve canonical values.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 1, 'Upgrade must record completion once.');
-    verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && str_contains($inventory, 'openDuplicateProductModal(this)'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
+    verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && !str_contains($inventory, 'openDuplicateProductModal'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
     $inlineToken = http_csrf($inventory);
     [$status, $typeBody] = http_request($base, 'pages/product_type_create.php', $cookies, ['csrf_token' => $inlineToken, 'type_name' => 'Oil Filter']);
     $newType = json_decode($typeBody, true, 32, JSON_THROW_ON_ERROR)['type'];
@@ -138,17 +138,14 @@ try {
     // Remove this isolated, unassigned fixture so legacy manager assertions remain meaningful.
     $pdo->prepare('DELETE FROM Vehicle_Compatibility WHERE vehicle_id = ?')->execute([$inlineVehicle['vehicle_id']]);
     [$status, $manager] = http_request($base, 'pages/compatibility.php', $cookies);
-    verify_http($status === 200 && str_contains($manager, 'Move Assignments and Remove Duplicate'), 'Compatibility manager must render.');
+    verify_http($status === 200 && !str_contains($manager, 'merge_vehicle') && !str_contains($manager, 'name="aliases"'), 'Compatibility manager must render.');
     $vehicleId = (int) $pdo->query("SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = 'hondaclick125'")->fetchColumn();
-    $typoId = (int) $pdo->query("SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = 'hondaclik125'")->fetchColumn();
     [$status] = http_request($base, 'pages/compatibility.php', $cookies, ['csrf_token' => http_csrf($manager), 'vehicle_id' => $vehicleId, 'vehicle_name' => 'Honda Click 125i', 'aliases' => 'Honda Click 125', 'save_vehicle' => '1']);
     verify_http($status === 302 && $pdo->query('SELECT compatibility FROM Products WHERE product_id = 1')->fetchColumn() === 'Honda Click 125i', 'Vehicle name corrections must update existing products through HTTP.');
     http_request($base, 'pages/compatibility.php', $cookies, ['csrf_token' => http_csrf($manager), 'vehicle_id' => $vehicleId, 'archive_vehicle' => '1']);
     verify_http((int) $pdo->query('SELECT is_active FROM Vehicle_Compatibility WHERE vehicle_id = ' . $vehicleId)->fetchColumn() === 0, 'Vehicle archive action must work.');
     http_request($base, 'pages/compatibility.php', $cookies, ['csrf_token' => http_csrf($manager), 'vehicle_id' => $vehicleId, 'restore_vehicle' => '1']);
     verify_http((int) $pdo->query('SELECT is_active FROM Vehicle_Compatibility WHERE vehicle_id = ' . $vehicleId)->fetchColumn() === 1, 'Vehicle restore action must work.');
-    [$status] = http_request($base, 'pages/compatibility.php', $cookies, ['csrf_token' => http_csrf($manager), 'vehicle_id' => $typoId, 'merge_target' => $vehicleId, 'merge_vehicle' => '1']);
-    verify_http($status === 302 && (int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 1, 'Duplicate must merge through authenticated HTTP action.');
     [$status, $pos] = http_request($base, 'pages/pos.php?q=Dunlop%20Front%20Tire', $cookies);
     verify_http($status === 200 && str_contains($pos, 'id="recPanel"') && str_contains($pos, 'Alpha alternative'), 'POS must show recommendations despite available Plus variant.');
     [$status, $inventory] = http_request($base, 'pages/products.php', $cookies);
@@ -177,16 +174,48 @@ try {
     [$status] = http_request($base, 'pages/vehicle_create.php', $anonymous, ['vehicle_name' => 'Anonymous']);
     verify_http($status === 401, 'Anonymous vehicle creation must be blocked.');
     [, $inventory] = http_request($base, 'pages/products.php', $cookies);
-    $copy = $edit;
-    unset($copy['edit_product'], $copy['product_id']);
-    $copy['add_product'] = '1';
-    $copy['product_name'] = 'Dunlop Front Tire (Copy)';
-    $copy['csrf_token'] = http_csrf($inventory);
-    http_request($base, 'pages/products.php', $cookies, $copy);
-    $copyId = (int) $pdo->query("SELECT product_id FROM Products WHERE product_name = 'Dunlop Front Tire (Copy)'")->fetchColumn();
-    verify_http($copyId > 3 && $pdo->query('SELECT product_name FROM Products WHERE product_id = 1')->fetchColumn() === 'Dunlop Front Tire', 'Saving copied details must create a separate product without changing the source.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch WHERE product_id = ' . $copyId)->fetchColumn() === 0 && (int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $copyId)->fetchColumn() === 0, 'Zero-stock duplicate must not copy any batches or quantity.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = ' . $copyId)->fetchColumn() === 1, 'Copied vehicle selections must be saved on the new product.');
+    $newProduct = $edit;
+    unset($newProduct['edit_product'], $newProduct['product_id']);
+    $newProduct['add_product'] = '1';
+    $newProduct['product_name'] = 'New Front Tire';
+    $newProduct['csrf_token'] = http_csrf($inventory);
+    http_request($base, 'pages/products.php', $cookies, $newProduct);
+    $newProductId = (int) $pdo->query("SELECT product_id FROM Products WHERE product_name = 'New Front Tire'")->fetchColumn();
+    verify_http($newProductId > 3 && $pdo->query('SELECT product_name FROM Products WHERE product_id = 1')->fetchColumn() === 'Dunlop Front Tire', 'Saving product details must create a separate product without changing the source.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch WHERE product_id = ' . $newProductId)->fetchColumn() === 0 && (int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $newProductId)->fetchColumn() === 0, 'Zero-stock product must not copy any batches or quantity.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = ' . $newProductId)->fetchColumn() === 1, 'Compatibility selections must be saved on the new product.');
+    verify_http(!str_contains($inventory, 'fitment[mounting]') && !str_contains($inventory, 'fitment[rating]') && !str_contains($inventory, 'Vehicle Compatibility') && !str_contains($inventory, 'openDuplicateProductModal'), 'Removed controls must not appear in Inventory.');
+    [, $pos] = http_request($base, 'pages/pos.php', $cookies);
+    $checkoutToken = http_csrf($pos);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'add_to_cart' => '1', 'product_id' => '2', 'qty' => '1']);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'checkout' => '1', 'payment_method' => 'GCASH']);
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Sale')->fetchColumn() === 0 && (int) $pdo->query('SELECT quantity_remaining FROM Stock_Batch WHERE product_id = 2')->fetchColumn() === 10, 'Missing GCash reference must not create a sale or consume stock.');
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'checkout' => '1', 'payment_method' => 'GCASH', 'reference_number' => '<script>bad</script>']);
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Sale')->fetchColumn() === 0, 'Invalid reference must be rejected server-side.');
+    $reference = '1234567890123';
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'checkout' => '1', 'payment_method' => 'GCASH', 'reference_number' => $reference]);
+    $saleId = (int) $pdo->query('SELECT MAX(sale_id) FROM Sale')->fetchColumn();
+    verify_http($saleId > 0 && $pdo->query('SELECT reference_number FROM Sale WHERE sale_id = ' . $saleId)->fetchColumn() === $reference, 'GCash reference must persist with the sale.');
+    [, $receipt] = http_request($base, 'pages/pos.php?receipt_id=' . $saleId, $cookies);
+    verify_http(str_contains($receipt, 'GCash Reference No.: ' . $reference), 'Owned receipt must display the stored reference.');
+    [, $otherReceipt] = http_request($base, 'pages/pos.php?receipt_id=' . $saleId, $cashierCookies);
+    verify_http(!str_contains($otherReceipt, $reference), 'Another cashier must not see a private receipt reference.');
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'add_to_cart' => '1', 'product_id' => '2', 'qty' => '1']);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'checkout' => '1', 'payment_method' => 'CASH', 'reference_number' => 'IGNORED']);
+    verify_http($pdo->query('SELECT reference_number FROM Sale ORDER BY sale_id DESC LIMIT 1')->fetchColumn() === null, 'Cash payments must not retain GCash references.');
+    [, $inventory] = http_request($base, 'pages/products.php', $cookies);
+    http_request($base, 'pages/products.php', $cookies, ['csrf_token' => http_csrf($inventory), 'archive_product' => '1', 'product_id' => '2']);
+    [$archiveStatus, $archivePage] = http_request($base, 'pages/product_archives.php', $cookies);
+    verify_http($archiveStatus === 200 && str_contains($archivePage, 'Dunlop Front Tire Plus') && str_contains($archivePage, 'Restore before'), 'Archive list must show the archived product and restoration deadline.');
+    http_request($base, 'pages/product_archives.php', $cookies, ['restore_product' => '1', 'product_id' => '2']);
+    verify_http($pdo->query('SELECT product_status FROM Products WHERE product_id = 2')->fetchColumn() === 'ARCHIVED', 'Restore must enforce CSRF.');
+    http_request($base, 'pages/product_archives.php', $cashierCookies, ['csrf_token' => 'invalid', 'restore_product' => '1', 'product_id' => '2']);
+    verify_http($pdo->query('SELECT product_status FROM Products WHERE product_id = 2')->fetchColumn() === 'ARCHIVED', 'Cashiers must not restore archived products.');
+    http_request($base, 'pages/product_archives.php', $cookies, ['csrf_token' => http_csrf($archivePage), 'restore_product' => '1', 'product_id' => '2']);
+    verify_http($pdo->query('SELECT product_status FROM Products WHERE product_id = 2')->fetchColumn() === 'ACTIVE' && (int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = 2')->fetchColumn() === 8, 'Restoration must preserve remaining batch stock.');
+    $pdo->exec("UPDATE Products SET product_status = 'ARCHIVED', archived_at = DATE_SUB(NOW(), INTERVAL 31 DAY), purge_after = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE product_id = 3");
+    http_request($base, 'pages/product_archives.php', $cookies, ['csrf_token' => http_csrf($archivePage), 'restore_product' => '1', 'product_id' => '3']);
+    verify_http($pdo->query('SELECT product_status FROM Products WHERE product_id = 3')->fetchColumn() === 'DELETED', 'Expired archives must not be restorable.');
     [, $inventory] = http_request($base, 'pages/products.php', $cookies);
     http_request($base, 'pages/products.php', $cookies, ['csrf_token' => http_csrf($inventory), 'archive_product' => '1', 'product_id' => '1']);
     verify_http($pdo->query('SELECT product_status FROM Products WHERE product_id = 1')->fetchColumn() === 'ARCHIVED', 'Archive action must preserve the product record.');

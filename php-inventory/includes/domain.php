@@ -123,6 +123,26 @@ function archive_product(PDO $pdo, int $productId): void
     $archiveStatement->execute(['product_id' => $productId]);
 }
 
+function restore_archived_product(PDO $pdo, int $productId): void
+{
+    $statement = $pdo->prepare("UPDATE Products SET product_status = 'ACTIVE', archived_at = NULL, purge_after = NULL, deleted_at = NULL
+        WHERE product_id = ? AND product_status = 'ARCHIVED' AND purge_after > NOW()");
+    $statement->execute([$productId]);
+    if ($statement->rowCount() !== 1) throw new RuntimeException('This product cannot be restored. Its 30-day restore period may have ended.');
+    sync_inventory_from_batches($pdo, $productId);
+}
+
+function validate_payment_reference(string $paymentMethod, mixed $input): ?string
+{
+    if ($paymentMethod !== 'GCASH') return null;
+    if (!is_string($input)) throw new RuntimeException('Enter the GCash reference number.');
+    $reference = trim($input);
+    if (strlen($reference) > 64 || !preg_match('/\A[A-Za-z0-9][A-Za-z0-9 -]{0,63}\z/', $reference)) {
+        throw new RuntimeException('Enter a GCash reference number of up to 64 letters, numbers, spaces or hyphens.');
+    }
+    return $reference;
+}
+
 function sync_reorder_alerts_for_catalog(PDO $pdo): void
 {
     ensure_product_lifecycle_schema($pdo);

@@ -29,7 +29,7 @@ function resolve_product_type(PDO $pdo, string $name): string
 
 function essential_fitment_fields(): array
 {
-    return ['size' => 'Tire size', 'position' => 'Position', 'voltage' => 'Voltage', 'viscosity' => 'Oil viscosity', 'mounting' => 'Mounting / thread size', 'rating' => 'Required rating'];
+    return ['size' => 'Tire size', 'position' => 'Position', 'voltage' => 'Voltage', 'viscosity' => 'Oil viscosity'];
 }
 
 function parse_essential_fitment(mixed $input): array
@@ -54,7 +54,7 @@ function product_specification_display(array $product): string
     if (!is_array($values)) return (string) ($product['specification'] ?? '');
     $lines = [];
     foreach ($values as $key => $value) {
-        if (is_string($key) && is_string($value)) $lines[] = (essential_fitment_fields()[$key] ?? $key) . ': ' . $value;
+        if (isset(essential_fitment_fields()[$key]) && is_string($value)) $lines[] = essential_fitment_fields()[$key] . ': ' . $value;
     }
     return trim((string) ($product['specification'] ?? '') . ($lines !== [] ? "\n\nEssential fitment:\n" . implode("\n", $lines) : ''));
 }
@@ -74,6 +74,7 @@ function essential_fitment_for_product(array $product): ?array
         return null;
     }
     if (!is_array($fitment)) return null;
+    $fitment = array_intersect_key($fitment, essential_fitment_fields());
     foreach ($fitment as $key => $value) {
         if (!is_string($key) || !is_string($value)) return null;
         $fitment[$key] = normalize_recommendation_attribute($value);
@@ -105,16 +106,8 @@ function essential_fitment_matches(array $source, array $candidate): bool
 
 function fetch_vehicle_options(PDO $pdo): array
 {
-    $vehicles = $pdo->query('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility ORDER BY vehicle_name, vehicle_id')->fetchAll(PDO::FETCH_ASSOC);
-    $aliases = [];
-    foreach ($pdo->query('SELECT vehicle_id, alias_key FROM Vehicle_Alias')->fetchAll(PDO::FETCH_ASSOC) as $alias) {
-        $aliases[(int) $alias['vehicle_id']][] = $alias['alias_key'];
-    }
-    foreach ($vehicles as &$vehicle) $vehicle['search_names'] = implode(' ', $aliases[(int) $vehicle['vehicle_id']] ?? []);
-    unset($vehicle);
-    return $vehicles;
+    return $pdo->query('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility ORDER BY vehicle_name, vehicle_id')->fetchAll(PDO::FETCH_ASSOC);
 }
-
 function refresh_product_vehicle_names(PDO $pdo): void
 {
     $pdo->exec('SET SESSION group_concat_max_len = 65535');
@@ -127,10 +120,10 @@ function refresh_product_vehicle_names(PDO $pdo): void
 
 function save_product_vehicles(PDO $pdo, int $productId, mixed $input): void
 {
-    if (!is_array($input) || count($input) > 30) throw new RuntimeException('Select up to 30 compatible vehicles.');
+    if (!is_array($input) || count($input) > 30) throw new RuntimeException('Select up to 30 compatible models.');
     $ids = [];
     foreach ($input as $id) {
-        if (!is_scalar($id) || !ctype_digit((string) $id) || (int) $id <= 0) throw new RuntimeException('Invalid vehicle selection.');
+        if (!is_scalar($id) || !ctype_digit((string) $id) || (int) $id <= 0) throw new RuntimeException('Invalid compatibility selection.');
         $ids[(int) $id] = (int) $id;
     }
     $existing = $pdo->prepare('SELECT vehicle_id FROM Product_Vehicle WHERE product_id = ?');
@@ -141,7 +134,7 @@ function save_product_vehicles(PDO $pdo, int $productId, mixed $input): void
     foreach ($ids as $id) {
         $lookup->execute([$id]);
         $vehicle = $lookup->fetch(PDO::FETCH_ASSOC);
-        if (!$vehicle || (!(bool) $vehicle['is_active'] && !in_array($id, $previous, true))) throw new RuntimeException('An unavailable vehicle was selected. Refresh the form.');
+        if (!$vehicle || (!(bool) $vehicle['is_active'] && !in_array($id, $previous, true))) throw new RuntimeException('An unavailable compatibility entry was selected. Refresh the form.');
         $names[] = $vehicle['vehicle_name'];
     }
     if (count($names) > 1 && in_array('universal', array_map('vehicle_name_key', $names), true)) throw new RuntimeException('Select Universal alone, or select specific vehicles.');
@@ -152,32 +145,21 @@ function save_product_vehicles(PDO $pdo, int $productId, mixed $input): void
     $pdo->prepare('UPDATE Products SET compatibility = ? WHERE product_id = ?')->execute([implode(', ', $names), $productId]);
 }
 
-function save_vehicle_option(PDO $pdo, ?int $id, string $name, string $aliases): int
+function save_vehicle_option(PDO $pdo, ?int $id, string $name): int
 {
     $isEdit = $id !== null;
-    if (strlen($aliases) > 4000) throw new RuntimeException('Vehicle aliases are too long.');
     $name = trim(preg_replace('/\s+/', ' ', $name) ?? $name);
-    if ($name === '' || strlen($name) > 100 || str_contains($name, ',') || vehicle_name_key($name) === '') throw new RuntimeException('Use a vehicle name of up to 100 characters without commas.');
-    $labels = array_merge([$name], preg_split('/\R/', trim($aliases)) ?: []);
-    if (count($labels) > 31) throw new RuntimeException('Use up to 30 aliases.');
-    $keys = [];
-    foreach ($labels as $label) {
-        if (trim($label) === '') continue;
-        $key = vehicle_name_key($label);
-        if ($key === '' || strlen($key) > 100) throw new RuntimeException('Invalid vehicle alias.');
-        $keys[$key] = true;
-    }
+    $key = vehicle_name_key($name);
+    if ($name === '' || strlen($name) > 100 || str_contains($name, ',') || $key === '') throw new RuntimeException('Use a compatibility name of up to 100 characters without commas.');
     if ($id !== null) {
         $statement = $pdo->prepare('SELECT vehicle_id FROM Vehicle_Compatibility WHERE vehicle_id = ? FOR UPDATE');
         $statement->execute([$id]);
-        if (!$statement->fetchColumn()) throw new RuntimeException('Vehicle not found.');
+        if (!$statement->fetchColumn()) throw new RuntimeException('Compatibility entry not found.');
     }
     $find = $pdo->prepare('SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = ? FOR UPDATE');
-    foreach (array_keys($keys) as $key) {
-        $find->execute([$key]);
-        $owner = $find->fetchColumn();
-        if ($owner !== false && (int) $owner !== $id) throw new RuntimeException('That name or alias belongs to another vehicle.');
-    }
+    $find->execute([$key]);
+    $owner = $find->fetchColumn();
+    if ($owner !== false && (int) $owner !== $id) throw new RuntimeException('That compatibility name already exists.');
     if ($id === null) {
         $pdo->prepare('INSERT INTO Vehicle_Compatibility (vehicle_name) VALUES (?)')->execute([$name]);
         $id = (int) $pdo->lastInsertId();
@@ -185,28 +167,10 @@ function save_vehicle_option(PDO $pdo, ?int $id, string $name, string $aliases):
         $pdo->prepare('UPDATE Vehicle_Compatibility SET vehicle_name = ? WHERE vehicle_id = ?')->execute([$name, $id]);
     }
     $pdo->prepare('DELETE FROM Vehicle_Alias WHERE vehicle_id = ?')->execute([$id]);
-    $insert = $pdo->prepare('INSERT INTO Vehicle_Alias (alias_key, vehicle_id) VALUES (?, ?)');
-    foreach (array_keys($keys) as $key) $insert->execute([$key, $id]);
+    $pdo->prepare('INSERT INTO Vehicle_Alias (alias_key, vehicle_id) VALUES (?, ?)')->execute([$key, $id]);
     if ($isEdit) refresh_product_vehicle_names($pdo);
     return $id;
 }
-
-function merge_vehicle_options(PDO $pdo, int $sourceId, int $targetId): void
-{
-    if ($sourceId === $targetId) throw new RuntimeException('Choose a different destination vehicle.');
-    $lock = $pdo->prepare('SELECT vehicle_id, vehicle_name, is_active FROM Vehicle_Compatibility WHERE vehicle_id IN (?, ?) ORDER BY vehicle_id FOR UPDATE');
-    $lock->execute([$sourceId, $targetId]);
-    $records = [];
-    foreach ($lock->fetchAll(PDO::FETCH_ASSOC) as $record) $records[(int) $record['vehicle_id']] = $record;
-    if (!isset($records[$sourceId], $records[$targetId]) || !$records[$targetId]['is_active']) throw new RuntimeException('Choose an existing active destination vehicle.');
-    if (vehicle_name_key($records[$sourceId]['vehicle_name']) === 'universal' || vehicle_name_key($records[$targetId]['vehicle_name']) === 'universal') throw new RuntimeException('Universal cannot be merged with vehicle models.');
-    $pdo->prepare('INSERT IGNORE INTO Product_Vehicle (product_id, vehicle_id) SELECT product_id, ? FROM Product_Vehicle WHERE vehicle_id = ?')->execute([$targetId, $sourceId]);
-    $pdo->prepare('DELETE FROM Product_Vehicle WHERE vehicle_id = ?')->execute([$sourceId]);
-    $pdo->prepare('UPDATE Vehicle_Alias SET vehicle_id = ? WHERE vehicle_id = ?')->execute([$targetId, $sourceId]);
-    $pdo->prepare('DELETE FROM Vehicle_Compatibility WHERE vehicle_id = ?')->execute([$sourceId]);
-    refresh_product_vehicle_names($pdo);
-}
-
 function find_pos_recommendation_sources(PDO $pdo, string $term, int $categoryId): array
 {
     if (trim($term) === '') return [];

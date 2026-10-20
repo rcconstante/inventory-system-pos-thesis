@@ -119,22 +119,17 @@ if ($dsn !== false && $dsn !== '') {
         check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 2) === [], 'POS recommendation sources must obey category filter.');
         check(find_pos_recommendation_sources($pdo, '%', 0) === [], 'Search wildcards must be treated literally.');
         $pdo->beginTransaction();
-        $vehicleId = save_vehicle_option($pdo, null, 'Honda Click 125', "Honda Clik 125\nHonda Click125");
+        $vehicleId = save_vehicle_option($pdo, null, 'Honda Click 125');
         save_product_vehicles($pdo, 1, [(string) $vehicleId]);
         save_product_vehicles($pdo, 7, [(string) $vehicleId]);
-        save_vehicle_option($pdo, $vehicleId, 'Honda Click 125i', 'Honda Click 125');
+        save_vehicle_option($pdo, $vehicleId, 'Honda Click 125i');
         check($pdo->query('SELECT compatibility FROM Products WHERE product_id = 1')->fetchColumn() === 'Honda Click 125i', 'Renaming vehicle must update linked product text.');
-        $duplicateId = save_vehicle_option($pdo, null, 'Honda Clik 125', '');
-        save_product_vehicles($pdo, 8, [(string) $duplicateId]);
-        merge_vehicle_options($pdo, $duplicateId, $vehicleId);
-        check($pdo->query('SELECT compatibility FROM Products WHERE product_id = 8')->fetchColumn() === 'Honda Click 125i', 'Merge must move product assignments to canonical vehicle.');
-        check((int) $pdo->query("SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = 'hondaclik125'")->fetchColumn() === $vehicleId, 'Merge must retain old spelling as alias.');
         $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 0 WHERE vehicle_id = ?')->execute([$vehicleId]);
         save_product_vehicles($pdo, 1, [(string) $vehicleId]);
         try { save_product_vehicles($pdo, 9, [(string) $vehicleId]); check(false, 'New archived vehicle assignment must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'unavailable'), 'Archived vehicles are blocked for new assignments.'); }
         $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 1 WHERE vehicle_id = ?')->execute([$vehicleId]);
-        try { save_vehicle_option($pdo, null, 'Honda Click-125i', ''); check(false, 'Duplicate aliases must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'another vehicle'), 'Duplicate normalized names rejected.'); }
-        $universalId = save_vehicle_option($pdo, null, 'Universal', '');
+        try { save_vehicle_option($pdo, null, 'Honda Click-125i'); check(false, 'Existing names must be rejected.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'already exists'), 'Equivalent names rejected.'); }
+        $universalId = save_vehicle_option($pdo, null, 'Universal');
         try { save_product_vehicles($pdo, 9, [$vehicleId, $universalId]); check(false, 'Mixed Universal selection must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'alone'), 'Universal cannot be mixed with specific models.'); }
         save_product_vehicles($pdo, 1, []);
         check((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = 1')->fetchColumn() === 0, 'Removing mistaken compatibility selection must remove mapping.');

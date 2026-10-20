@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/domain.php';
 
-const INVENTORY_SCHEMA_VERSION = '2026_10_recommendation_catalog_v1';
+const INVENTORY_SCHEMA_VERSION = '2026_10_simple_catalog_receipts_v2';
 
 class InventoryDatabaseUpgradeBusy extends RuntimeException {}
 
@@ -41,6 +41,7 @@ function run_inventory_database_upgrades(PDO $pdo): bool
         foreach ($tables[0] as $table) $pdo->exec($table);
         ensure_product_lifecycle_schema($pdo);
         if (!table_column_exists($pdo, 'Products', 'essential_fitment')) $pdo->exec('ALTER TABLE Products ADD COLUMN essential_fitment TEXT NULL');
+        if (!table_column_exists($pdo, 'Sale', 'reference_number')) $pdo->exec('ALTER TABLE Sale ADD COLUMN reference_number VARCHAR(64) NULL');
         $pdo->beginTransaction();
         $products = $pdo->query("SELECT product_id, COALESCE(compatibility, '') AS compatibility FROM Products ORDER BY product_id FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
         $lookup = $pdo->prepare('SELECT vehicle_id FROM Vehicle_Alias WHERE alias_key = ?');
@@ -51,7 +52,7 @@ function run_inventory_database_upgrades(PDO $pdo): bool
                 if ($name === '') continue;
                 $lookup->execute([vehicle_name_key($name)]);
                 $id = $lookup->fetchColumn();
-                if ($id === false) $id = save_vehicle_option($pdo, null, $name, '');
+                if ($id === false) $id = save_vehicle_option($pdo, null, $name);
                 $insert->execute([(int) $product['product_id'], (int) $id]);
             }
         }
@@ -60,6 +61,17 @@ function run_inventory_database_upgrades(PDO $pdo): bool
         foreach ($types as $product) {
             $type = trim($product['product_type']) === '' ? ['type_name' => ''] : save_product_type_option($pdo, $product['product_type']);
             $updateType->execute([$type['type_name'], $product['product_id']]);
+        }
+        $pdo->exec('DELETE FROM Vehicle_Alias');
+        $nameIndex = $pdo->prepare('INSERT INTO Vehicle_Alias (alias_key, vehicle_id) VALUES (?, ?)');
+        foreach (fetch_vehicle_options($pdo) as $entry) $nameIndex->execute([vehicle_name_key($entry['vehicle_name']), $entry['vehicle_id']]);
+        $fitments = $pdo->query('SELECT product_id, essential_fitment FROM Products WHERE essential_fitment IS NOT NULL')->fetchAll(PDO::FETCH_ASSOC);
+        $updateFitment = $pdo->prepare('UPDATE Products SET essential_fitment = ? WHERE product_id = ?');
+        foreach ($fitments as $product) {
+            $fitment = json_decode($product['essential_fitment'], true, 32, JSON_THROW_ON_ERROR);
+            if (!is_array($fitment)) throw new RuntimeException('Invalid saved fitment for product ' . $product['product_id']);
+            $clean = array_intersect_key($fitment, essential_fitment_fields());
+            $updateFitment->execute([json_encode((object) $clean, JSON_THROW_ON_ERROR), $product['product_id']]);
         }
         refresh_product_vehicle_names($pdo);
         sync_feature_matches_for_catalog($pdo);

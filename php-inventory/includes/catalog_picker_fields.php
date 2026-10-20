@@ -2,14 +2,14 @@
 $isVehiclePicker = $pickerKind === 'vehicle';
 $pickerField = $isVehiclePicker ? 'vehicle_ids' : 'product_type';
 $pickerId = $formPrefix . $pickerField;
-$pickerLabel = $isVehiclePicker ? 'Vehicle Compatibility (select multiple)' : 'Product Type (select one)';
+$pickerLabel = $isVehiclePicker ? 'Compatibility (select multiple)' : 'Product Type (select one)';
 ?>
 <div data-catalog-picker="<?php echo h($pickerKind); ?>" data-create-url="<?php echo h(app_url($isVehiclePicker ? 'pages/vehicle_create.php' : 'pages/product_type_create.php')); ?>">
     <label id="<?php echo h($pickerId . '_label'); ?>" for="<?php echo h($pickerId); ?>" class="mb-1 block text-sm font-medium"><?php echo h($pickerLabel); ?></label>
     <select id="<?php echo h($pickerId); ?>" name="<?php echo $isVehiclePicker ? 'vehicle_ids[]' : 'product_type'; ?>" <?php echo $isVehiclePicker ? 'multiple size="5"' : ''; ?> class="w-full rounded border bg-white px-3 py-2 dark:bg-gray-700">
         <?php if ($isVehiclePicker): ?>
             <?php foreach ($vehicleOptions as $vehicle): ?>
-                <option value="<?php echo (int) $vehicle['vehicle_id']; ?>" data-active="<?php echo $vehicle['is_active'] ? '1' : '0'; ?>" data-name="<?php echo h($vehicle['vehicle_name']); ?>" data-search="<?php echo h($vehicle['search_names']); ?>" <?php echo $vehicle['is_active'] ? '' : 'disabled'; ?>><?php echo h($vehicle['vehicle_name'] . ($vehicle['is_active'] ? '' : ' (archived; existing assignments only)')); ?></option>
+                <option value="<?php echo (int) $vehicle['vehicle_id']; ?>" data-active="<?php echo $vehicle['is_active'] ? '1' : '0'; ?>" data-name="<?php echo h($vehicle['vehicle_name']); ?>" <?php echo $vehicle['is_active'] ? '' : 'disabled'; ?>><?php echo h($vehicle['vehicle_name'] . ($vehicle['is_active'] ? '' : ' (archived)')); ?></option>
             <?php endforeach; ?>
         <?php else: ?>
             <option value="" data-name="Not specified">Not specified</option>
@@ -42,5 +42,5 @@ $pickerLabel = $isVehiclePicker ? 'Vehicle Compatibility (select multiple)' : 'P
             <?php endif; ?>
         </div>
     </div>
-    <?php if ($isVehiclePicker): ?><p class="mt-1 text-xs text-gray-500">Choose vehicles, then Apply. Universal must be selected alone. New models are saved for future products even if the selection is canceled.</p><?php endif; ?>
+    <?php if ($isVehiclePicker): ?><p class="mt-1 text-xs text-gray-500">Choose compatible models, then Apply. Select Universal alone if it fits all models.</p><?php endif; ?>
 </div>

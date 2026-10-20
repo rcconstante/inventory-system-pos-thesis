@@ -100,10 +100,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Add at least one item to the cart before checkout.');
             }
 
-            $paymentMethod = strtoupper((string) ($_POST['payment_method'] ?? preferred_payment_method()));
+            $paymentMethodInput = $_POST['payment_method'] ?? preferred_payment_method();
+            if (!is_string($paymentMethodInput)) throw new RuntimeException('Please select a valid payment method.');
+            $paymentMethod = strtoupper($paymentMethodInput);
             if (!in_array($paymentMethod, ['CASH', 'GCASH', 'E-WALLET', 'CARD'], true)) {
                 throw new RuntimeException('Please select a valid payment method.');
             }
+            $referenceNumber = validate_payment_reference($paymentMethod, $_POST['reference_number'] ?? null);
 
             $pdo->beginTransaction();
 
@@ -150,13 +153,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $saleStatement = $pdo->prepare(
-                "INSERT INTO Sale (user_id, total_amount, payment_method, status)
-                 VALUES (:user_id, :total_amount, :payment_method, 'COMPLETED')"
+                "INSERT INTO Sale (user_id, total_amount, payment_method, reference_number, status)
+                 VALUES (:user_id, :total_amount, :payment_method, :reference_number, 'COMPLETED')"
             );
             $saleStatement->execute([
                 'user_id' => (int) current_user_id(),
                 'total_amount' => $totalAmount,
                 'payment_method' => $paymentMethod,
+                'reference_number' => $referenceNumber,
             ]);
             $saleId = (int) $pdo->lastInsertId();
 
@@ -187,18 +191,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('pages/pos.php?receipt_id=' . $saleId);
             exit;
         }
+    } catch (PDOException $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        error_log('Checkout failed: ' . $exception->getMessage());
+        set_flash('error', 'The checkout action could not be completed.');
     } catch (RuntimeException $exception) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
 
         set_flash('error', $exception->getMessage());
-    } catch (PDOException $exception) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        set_flash('error', 'The checkout action could not be completed.');
     }
     
     // Redirect preserving query string if any
@@ -634,7 +639,7 @@ include '../includes/header.php';
                 </div>
                 <div id="refNumberContainer" class="hidden flex-col items-center mb-2 text-left">
                     <label class="block text-sm mb-2">If paying via GCASH, enter Reference Number</label>
-                    <input type="text" id="referenceNumber" class="w-64 border border-black dark:border-white px-3 py-2 bg-transparent focus:outline-none text-sm" placeholder="Enter reference number">
+                    <input type="text" id="referenceNumber" maxlength="64" aria-describedby="refNumberError" class="w-64 border border-black dark:border-white px-3 py-2 bg-transparent focus:outline-none text-sm" placeholder="Enter reference number">
                     <p id="refNumberError" class="text-red-500 text-xs mt-1 hidden">Reference number is required for GCASH payments.</p>
                 </div>
             </div>
@@ -742,13 +747,14 @@ include '../includes/header.php';
 
         if (method === 'GCASH') {
             var refNum = document.getElementById('referenceNumber').value.trim();
-            if (!refNum) {
+            if (!/^[A-Za-z0-9][A-Za-z0-9 -]{0,63}$/.test(refNum)) {
+                document.getElementById('refNumberError').textContent = 'Enter a valid reference number (up to 64 letters, numbers, spaces or hyphens).';
                 document.getElementById('refNumberError').classList.remove('hidden');
                 document.getElementById('referenceNumber').focus();
                 return false;
             }
             document.getElementById('hiddenRefNumber').value = refNum;
-        }
+        } else document.getElementById('hiddenRefNumber').value = '';
         return true;
     }
 
@@ -856,6 +862,9 @@ include '../includes/header.php';
         <div class="p-8 border-t border-black dark:border-gray-600 bg-white dark:bg-gray-800">
             <div class="text-sm font-bold mb-3">TOTAL: <?php echo number_format((float)$receiptSale['total_amount'], 2); ?></div>
             <div class="text-sm font-bold mb-8 uppercase">PAID BY: <?php echo h($receiptSale['payment_method']); ?></div>
+            <?php if ($receiptSale['payment_method'] === 'GCASH' && !empty($receiptSale['reference_number'])): ?>
+                <div class="text-sm mb-4">GCash Reference No.: <?php echo h($receiptSale['reference_number']); ?></div>
+            <?php endif; ?>
             <div class="text-center text-sm font-medium mb-4">Thank You :)</div>
             <div class="flex justify-center gap-4">
                 <button type="button" onclick="printReceipt()" class="border-2 border-black dark:border-black rounded-md px-8 py-2 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-700 bg-white dark:bg-transparent text-black dark:text-white uppercase tracking-wide">Print Receipt</button>

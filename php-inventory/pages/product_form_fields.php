@@ -23,13 +23,13 @@ $formPrefix = $formPrefix ?? '';
         <?php $pickerKind = 'type'; include __DIR__ . '/../includes/catalog_picker_fields.php'; ?>
     </div>
     <div class="md:col-span-2">
-        <label class="mb-1 block text-sm font-medium dark:text-gray-200">Specification</label>
+        <label class="mb-1 block text-sm font-medium dark:text-gray-200">Additional Details</label>
         <textarea id="<?php echo h($formPrefix . 'specification'); ?>" name="specification" rows="2" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>
     </div>
     <div class="md:col-span-2">
         <fieldset class="rounded border p-3 dark:border-gray-600">
-            <legend class="px-1 text-sm font-medium">Essential Fitment</legend>
-            <p class="mb-3 text-xs text-gray-500">Complete only requirements that replacements must match. Use consistent units. Keep descriptive details in Specification. Tire size may also be read from Specification.</p>
+            <legend class="px-1 text-sm font-medium">Specifications</legend>
+            <p class="mb-3 text-xs text-gray-500">Fill in the details a replacement must match. Leave other fields blank.</p>
             <div class="grid gap-3 md:grid-cols-2">
             <?php foreach (essential_fitment_fields() as $key => $label): ?>
                 <label for="<?php echo h($formPrefix . 'fitment_' . $key); ?>" class="text-sm"><?php echo h($label); ?>

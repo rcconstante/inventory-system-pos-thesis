@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS Sale (
     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     total_amount DECIMAL(10, 2) NOT NULL,
     payment_method VARCHAR(50),
+    reference_number VARCHAR(64) NULL,
     status VARCHAR(50),
     cancel_reason VARCHAR(255) DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES User(user_id) ON DELETE SET NULL
