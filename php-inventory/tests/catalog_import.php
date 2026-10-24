@@ -2,7 +2,7 @@
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/../includes/app.php';
-require_once __DIR__ . '/../includes/catalog_import.php';
+require_once __DIR__ . '/../includes/database_upgrades.php';
 $dsn = getenv('INVENTORY_TEST_DB_DSN');
 if (!$dsn) throw new RuntimeException('Set INVENTORY_TEST_DB_DSN for a disposable MySQL server.');
 $pdo = new PDO($dsn, getenv('INVENTORY_TEST_DB_USER') ?: 'root', getenv('INVENTORY_TEST_DB_PASS') ?: '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -20,7 +20,7 @@ try {
     foreach ($tables[0] as $table) $pdo->exec($table);
     $pdo->exec("INSERT INTO Role (role_id, role_type) VALUES (1, 'admin')");
     $pdo->exec("INSERT INTO User (user_id, full_name, username, password, role_id) VALUES (1, 'Preserved Admin', 'admin', 'test', 1)");
-    import_final_catalog($pdo);
+    replace_final_catalog_once($pdo);
     verify_import((int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 220, 'All source products must load.');
     verify_import((int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch')->fetchColumn() === 425, 'All source batches must load.');
     verify_import((int) $pdo->query('SELECT SUM(quantity_remaining) FROM Stock_Batch')->fetchColumn() === 1506, 'Batch units must reconcile.');
@@ -38,8 +38,7 @@ try {
         $value = json_decode($pdo->query('SELECT essential_fitment FROM Products WHERE product_id = ' . (int) $alternative['alternative_id'])->fetchColumn(), true);
         verify_import($value['viscosity'] === '10W-40', 'Oil recommendations must match essential viscosity.');
     }
-    try { import_final_catalog($pdo); verify_import(false, 'Repeated import must fail.'); }
-    catch (RuntimeException $exception) { verify_import(str_contains($exception->getMessage(), 'empty catalog'), 'Repeated import must preserve existing stock.'); }
+    verify_import(!replace_final_catalog_once($pdo), 'Completed update must not run again.');
     verify_import((int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch')->fetchColumn() === 425, 'Rejected repeat must not duplicate batches.');
     $pdo->exec("INSERT INTO Sale (sale_id, user_id, total_amount, payment_method) VALUES (1, 1, 1830, 'CASH')");
     $pdo->exec('INSERT INTO Sale_Item (sale_item_id, sale_id, product_id, quantity, selling_price, subtotal) VALUES (1, 1, 2, 6, 305, 1830)');

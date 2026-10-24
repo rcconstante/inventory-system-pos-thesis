@@ -49,44 +49,82 @@ function final_catalog_payload(): array
     return $payload;
 }
 
-function import_final_catalog(PDO $pdo): void
+const INVENTORY_FINAL_CATALOG_VERSION = '2026_10_final_catalog_220_v1';
+
+function final_catalog_is_current(PDO $pdo): bool
 {
-    $payload = final_catalog_payload();
-    ensure_product_lifecycle_schema($pdo);
-    if ($pdo->inTransaction()) throw new RuntimeException('Finish the current operation before importing products.');
-    $pdo->beginTransaction();
     try {
-        // Lock the catalog range: another import or product insertion cannot interleave.
-        if ($pdo->query('SELECT product_id FROM Products FOR UPDATE')->fetchColumn() !== false) throw new RuntimeException('The final list can only be loaded into an empty catalog. Existing products and history were kept.');
-        $categories = [];
-        foreach ($pdo->query('SELECT category_id, category_name FROM Category ORDER BY category_id FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC) as $category) $categories[normalize_recommendation_attribute($category['category_name'])] = (int) $category['category_id'];
-        $models = [];
-        foreach (fetch_vehicle_options($pdo) as $model) $models[vehicle_name_key($model['vehicle_name'])] = (int) $model['vehicle_id'];
-        $insert = $pdo->prepare('INSERT INTO Products (product_id, category_id, product_name, brand, product_type, specification, essential_fitment, description, price, retail_price, acquisition_cost, manufacturing_date, expiration_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $inventory = $pdo->prepare('INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date) VALUES (?, 0, ?, ?)');
-        foreach ($payload['products'] as $product) {
-            $categoryKey = normalize_recommendation_attribute($product['category']);
-            if (!isset($categories[$categoryKey])) {
-                $pdo->prepare('INSERT INTO Category (category_name) VALUES (?)')->execute([$product['category']]);
-                $categories[$categoryKey] = (int) $pdo->lastInsertId();
-            }
-            $type = save_product_type_option($pdo, $product['type']);
-            $insert->execute([$product['number'], $categories[$categoryKey], $product['name'], $product['brand'], $type['type_name'], $product['specification'], json_encode((object) parse_essential_fitment($product['fitment']), JSON_THROW_ON_ERROR), $product['description'], $product['price'], $product['retail_price'], $product['cost'], $product['manufacturing_date'], $product['expiration_date']]);
-            $inventory->execute([$product['number'], $product['minimum'], $product['expiration_date']]);
-            $ids = [];
-            foreach ($product['compatibility'] as $name) {
-                $key = vehicle_name_key($name);
-                if (!isset($models[$key])) $models[$key] = save_vehicle_option($pdo, null, $name);
-                $ids[] = $models[$key];
-            }
-            save_product_vehicles($pdo, $product['number'], $ids);
-            foreach ($product['batches'] as $batch) create_stock_batch($pdo, $product['number'], $batch['quantity'], (float) $batch['cost'], $batch['manufacturing_date'], $batch['expiration_date'], $batch['number']);
+        $statement = $pdo->prepare('SELECT 1 FROM Schema_Migration WHERE migration_id = ?');
+        $statement->execute([INVENTORY_FINAL_CATALOG_VERSION]);
+        return $statement->fetchColumn() !== false;
+    } catch (PDOException $exception) {
+        if (($exception->errorInfo[1] ?? null) === 1146) return false;
+        throw $exception;
+    }
+}
+
+function record_final_catalog_import(PDO $pdo): void
+{
+    $pdo->prepare('INSERT INTO Schema_Migration (migration_id) VALUES (?)')->execute([INVENTORY_FINAL_CATALOG_VERSION]);
+}
+
+function insert_final_catalog_products(PDO $pdo, array $payload): void
+{
+    $categories = [];
+    foreach ($pdo->query('SELECT category_id, category_name FROM Category ORDER BY category_id FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC) as $category) $categories[normalize_recommendation_attribute($category['category_name'])] = (int) $category['category_id'];
+    $models = [];
+    foreach (fetch_vehicle_options($pdo) as $model) $models[vehicle_name_key($model['vehicle_name'])] = (int) $model['vehicle_id'];
+    $insert = $pdo->prepare('INSERT INTO Products (category_id, product_name, brand, product_type, specification, essential_fitment, description, price, retail_price, acquisition_cost, manufacturing_date, expiration_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $inventory = $pdo->prepare('INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date) VALUES (?, 0, ?, ?)');
+    foreach ($payload['products'] as $product) {
+        $categoryKey = normalize_recommendation_attribute($product['category']);
+        if (!isset($categories[$categoryKey])) {
+            $pdo->prepare('INSERT INTO Category (category_name) VALUES (?)')->execute([$product['category']]);
+            $categories[$categoryKey] = (int) $pdo->lastInsertId();
         }
-        sync_reorder_alerts_for_catalog($pdo);
-        sync_feature_matches_for_catalog($pdo);
+        $type = save_product_type_option($pdo, $product['type']);
+        $insert->execute([$categories[$categoryKey], $product['name'], $product['brand'], $type['type_name'], $product['specification'], json_encode((object) parse_essential_fitment($product['fitment']), JSON_THROW_ON_ERROR), $product['description'], $product['price'], $product['retail_price'], $product['cost'], $product['manufacturing_date'], $product['expiration_date']]);
+        $productId = (int) $pdo->lastInsertId();
+        $inventory->execute([$productId, $product['minimum'], $product['expiration_date']]);
+        $ids = [];
+        foreach ($product['compatibility'] as $name) {
+            $key = vehicle_name_key($name);
+            if (!isset($models[$key])) $models[$key] = save_vehicle_option($pdo, null, $name);
+            $ids[] = $models[$key];
+        }
+        save_product_vehicles($pdo, $productId, $ids);
+        foreach ($product['batches'] as $batch) create_stock_batch($pdo, $productId, $batch['quantity'], (float) $batch['cost'], $batch['manufacturing_date'], $batch['expiration_date'], $batch['number']);
+    }
+    sync_reorder_alerts_for_catalog($pdo);
+    sync_feature_matches_for_catalog($pdo);
+}
+
+function replace_final_catalog_once(PDO $pdo): bool
+{
+    if (final_catalog_is_current($pdo)) return false;
+    if ($pdo->inTransaction()) throw new RuntimeException('Catalog replacement must run before other transactions.');
+    $lockName = inventory_upgrade_lock_name($pdo);
+    $lock = $pdo->prepare('SELECT GET_LOCK(?, 3)');
+    $lock->execute([$lockName]);
+    if ((int) $lock->fetchColumn() !== 1) throw new InventoryDatabaseUpgradeBusy('The catalog update is already in progress.');
+    try {
+        if (final_catalog_is_current($pdo)) return false;
+        $payload = final_catalog_payload();
+        ensure_product_lifecycle_schema($pdo);
+        $pdo->beginTransaction();
+        $pdo->query('SELECT product_id FROM Products FOR UPDATE')->fetchAll(PDO::FETCH_COLUMN);
+        // Keep historical IDs so receipts and returns cannot point at a new product.
+        $pdo->exec("UPDATE Products SET product_status = 'DELETED', deleted_at = COALESCE(deleted_at, NOW()), purge_after = NULL WHERE product_status <> 'DELETED'");
+        $pdo->exec("UPDATE Stock_Batch SET status = 'DISPOSED', is_depleted = 1 WHERE status = 'ACTIVE'");
+        $pdo->exec('UPDATE Inventory SET current_stock = 0');
+        insert_final_catalog_products($pdo, $payload);
+        record_final_catalog_import($pdo);
         $pdo->commit();
+        return true;
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         throw $exception;
+    } finally {
+        $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lockName]);
     }
 }

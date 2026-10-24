@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/domain.php';
+require_once __DIR__ . '/catalog_import.php';
 
 const INVENTORY_SCHEMA_VERSION = '2026_10_simple_catalog_receipts_v2';
 
@@ -89,19 +90,34 @@ function run_inventory_database_upgrades(PDO $pdo): bool
 function ensure_inventory_database_ready(PDO $pdo): void
 {
     try {
-        if (inventory_database_is_current($pdo)) return;
+        if (inventory_database_is_current($pdo) && final_catalog_is_current($pdo)) {
+            sync_session_catalog_version();
+            return;
+        }
         $user = $pdo->prepare('SELECT role_id, is_active FROM User WHERE user_id = ?');
         $user->execute([current_user_id()]);
         $account = $user->fetch(PDO::FETCH_ASSOC);
         if (!$account || !(bool) $account['is_active'] || (int) $account['role_id'] !== APP_ROLE_ADMIN) {
             inventory_upgrade_unavailable('A system update is pending. Ask an administrator to sign in and open the system once.');
         }
-        if (run_inventory_database_upgrades($pdo)) set_flash('success', 'System updated successfully. Existing products and stock history were preserved.');
+        $schemaUpdated = run_inventory_database_upgrades($pdo);
+        $catalogUpdated = replace_final_catalog_once($pdo);
+        sync_session_catalog_version();
+        if ($catalogUpdated) set_flash('success', 'Product list updated: 220 products and 425 batches loaded. Previous products were removed from Inventory and POS. Sales history was preserved.');
+        elseif ($schemaUpdated) set_flash('success', 'System updated successfully.');
     } catch (InventoryDatabaseUpgradeBusy) {
         inventory_upgrade_unavailable('The database update is already in progress. Reload shortly.');
     } catch (Throwable $exception) {
         error_log('Automatic inventory database upgrade failed: ' . $exception->getMessage());
         inventory_upgrade_unavailable('The automatic database update could not finish. Reload to retry. If this continues, contact the system maintainer to check database permissions and logs.');
+    }
+}
+
+function sync_session_catalog_version(): void
+{
+    if (($_SESSION['inventory_catalog_version'] ?? '') !== INVENTORY_FINAL_CATALOG_VERSION) {
+        unset($_SESSION['cart']);
+        $_SESSION['inventory_catalog_version'] = INVENTORY_FINAL_CATALOG_VERSION;
     }
 }
 

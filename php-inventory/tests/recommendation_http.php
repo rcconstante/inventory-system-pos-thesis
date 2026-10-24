@@ -56,6 +56,8 @@ try {
     // Exercise upgrade from the previous schema, then repeat it to prove idempotency.
     $pdo->exec('ALTER TABLE Products DROP COLUMN essential_fitment');
     $pdo->exec('DROP TABLE Product_Vehicle, Vehicle_Alias, Vehicle_Compatibility, Recommendation_State, Product_Type, Schema_Migration');
+    $pdo->exec('CREATE TABLE Schema_Migration (migration_id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+    $pdo->exec("INSERT INTO Schema_Migration (migration_id) VALUES ('2026_10_final_catalog_220_v1')");
     preg_match('/host=([^;]+)/', $dsn, $host);
     preg_match('/port=(\d+)/', $dsn, $port);
     $env = array_merge(getenv(), [
@@ -90,7 +92,7 @@ try {
         http_request($base, 'login.php', $pendingCookies, ['csrf_token' => http_csrf($pendingLogin), 'email' => 'http-cashier', 'password' => 'local-test-only']);
         [$pendingStatus, $pendingBody] = http_request($base, 'pages/pos.php', $pendingCookies);
         verify_http($pendingStatus === 503 && str_contains($pendingBody, 'administrator'), 'Cashier must see a clear pending-upgrade response.');
-        verify_http((int) $pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Schema_Migration'")->fetchColumn() === 0, 'Non-admin requests must not create migration tables or run the upgrade.');
+        verify_http((int) $pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Schema_Migration'")->fetchColumn() === 1, 'Non-admin requests must leave the pre-recorded catalog marker unchanged.');
     }
     [$status] = http_request($base, 'login.php', $cookies, ['csrf_token' => http_csrf($login), 'email' => 'http-admin', 'password' => 'local-test-only']);
     verify_http($status === 302, 'Admin login must succeed.');
@@ -98,7 +100,7 @@ try {
         $pdo->prepare('UPDATE Products SET compatibility = ? WHERE product_id = 3')->execute([str_repeat('x', 101)]);
         [$failureStatus, $failureBody] = http_request($base, 'pages/products.php', $cookies);
         verify_http($failureStatus === 503 && str_contains($failureBody, 'could not finish') && !str_contains($failureBody, 'SQLSTATE'), 'Failed automatic upgrade must show a safe, actionable response.');
-        verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 0, 'Failed automatic upgrade must remain pending.');
+        verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 1, 'Failed automatic upgrade must leave the schema update pending.');
         [$failureStatus, $failureJson] = http_request($base, 'pages/vehicle_create.php', $cookies, ['csrf_token' => http_csrf($login), 'vehicle_name' => 'Should not be created']);
         // Login regenerates the session but retains its CSRF token.
         verify_http($failureStatus === 503 && isset(json_decode($failureJson, true)['error']), 'Inline APIs must return JSON while the upgrade is unavailable.');
@@ -109,11 +111,10 @@ try {
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 1, 'Migration must consolidate formatting variants.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle')->fetchColumn() === 3, 'Migration must preserve all assignments across reruns.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === 1 && $pdo->query('SELECT product_type FROM Products WHERE product_id = 2')->fetchColumn() === 'Tire', 'Migration must consolidate existing product types and preserve canonical values.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 1, 'Upgrade must record completion once.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 2, 'Both catalog and schema completion markers must remain unique.');
     verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && !str_contains($inventory, 'openDuplicateProductModal'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
     $inlineToken = http_csrf($inventory);
-    http_request($base, 'pages/products.php', $cookies, ['csrf_token' => $inlineToken, 'import_final_catalog' => '1']);
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 3 && (int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch')->fetchColumn() === 2, 'Final catalog import must never overwrite a nonempty catalog.');
+    verify_http(!str_contains($inventory, 'Load Final Product List'), 'The automatic catalog update must not require a manual load button.');
     [$status, $typeBody] = http_request($base, 'pages/product_type_create.php', $cookies, ['csrf_token' => $inlineToken, 'type_name' => 'Oil Filter']);
     $newType = json_decode($typeBody, true, 32, JSON_THROW_ON_ERROR)['type'];
     verify_http($status === 200 && $newType['type_name'] === 'Oil Filter', 'New product type must persist.');
@@ -210,7 +211,6 @@ try {
     [, $login] = http_request($base, 'login.php', $cashierCookies);
     http_request($base, 'login.php', $cashierCookies, ['csrf_token' => http_csrf($login), 'email' => 'http-cashier', 'password' => 'local-test-only']);
     [, $cashierInventory] = http_request($base, 'pages/products.php', $cashierCookies);
-    http_request($base, 'pages/products.php', $cashierCookies, ['csrf_token' => http_csrf($cashierInventory), 'import_final_catalog' => '1']);
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 3 && !str_contains($cashierInventory, 'Load Final Product List'), 'Cashiers must not access the final catalog loader.');
     [$status] = http_request($base, 'pages/product_options.php', $cashierCookies);
     verify_http($status === 302, 'Cashier must not access compatibility management.');

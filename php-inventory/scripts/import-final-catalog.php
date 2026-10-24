@@ -9,9 +9,10 @@ try {
         require_once __DIR__ . '/../includes/config.php';
         require_once __DIR__ . '/../includes/database_upgrades.php';
         run_inventory_database_upgrades($pdo);
-        import_final_catalog($pdo);
-        echo "Imported 220 products and 425 batches. Existing accounts were preserved.\n";
-    } else echo "Validated 220 products, 425 batches, 1506 units. Use --apply on an empty catalog to import.\n";
+        echo replace_final_catalog_once($pdo)
+            ? "Updated catalog: 220 products and 425 batches loaded. Existing accounts and sales history were preserved.\n"
+            : "The final catalog update was already completed. No data changed.\n";
+    } else echo "Validated 220 products, 425 batches, 1506 units. Use --apply to run the one-time catalog update.\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, $exception->getMessage() . "\n");
     exit(1);
