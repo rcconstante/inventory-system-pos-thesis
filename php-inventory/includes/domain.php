@@ -369,7 +369,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
             }
         }
 
-        $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 2) ON DUPLICATE KEY UPDATE algorithm_version = 2');
+        $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 3) ON DUPLICATE KEY UPDATE algorithm_version = 3');
         if (!$alreadyInTransaction) {
             $pdo->commit();
         }
@@ -384,7 +384,7 @@ function sync_feature_matches_for_catalog(PDO $pdo): void
 function ensure_feature_matches_synced(PDO $pdo): void
 {
     $version = (int) $pdo->query('SELECT algorithm_version FROM Recommendation_State WHERE state_id = 1')->fetchColumn();
-    if ($version !== 2) {
+    if ($version !== 3) {
         sync_feature_matches_for_catalog($pdo);
     }
 }

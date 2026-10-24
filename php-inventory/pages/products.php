@@ -33,7 +33,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf_or_fail('pages/products.php');
 
     try {
-        if (isset($_POST['add_product']) || isset($_POST['edit_product'])) {
+        if (isset($_POST['import_final_catalog'])) {
+            if (current_role_id() !== APP_ROLE_ADMIN) throw new RuntimeException('Only an administrator can load the final product list.');
+            require_once '../includes/catalog_import.php';
+            import_final_catalog($pdo);
+            set_flash('success', 'Loaded 220 products with 425 stock batches.');
+        } elseif (isset($_POST['add_product']) || isset($_POST['edit_product'])) {
             $productId = isset($_POST['edit_product']) ? (int) ($_POST['product_id'] ?? 0) : null;
             $productName = trim((string) ($_POST['product_name'] ?? ''));
             $categoryId = (int) ($_POST['category_id'] ?? 0);
@@ -486,6 +491,7 @@ try {
 $vehicleOptions = fetch_vehicle_options($pdo);
 $productTypeOptions = $pdo->query('SELECT type_id, type_name FROM Product_Type ORDER BY type_name, type_id')->fetchAll(PDO::FETCH_ASSOC);
 $page_title = 'INVENTORY';
+$canImportFinalCatalog = current_role_id() === APP_ROLE_ADMIN && (int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 0;
 $page_stylesheet = 'assets/inventory.css';
 $page_body_class = 'inventory-page';
 include '../includes/header.php';
@@ -508,6 +514,7 @@ include '../includes/header.php';
     </form>
 
     <?php if ($canManage): ?>
+        <?php if ($canImportFinalCatalog): ?><button type="button" onclick="document.getElementById('importCatalogDialog').showModal()" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Load Final Product List</button><?php endif; ?>
         <a href="<?php echo h(app_url('pages/product_archives.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Archived Products</a>
         <button type="button" id="openProductOptions" aria-haspopup="dialog" aria-controls="productOptionsDialog" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Manage Product Options</button>
         <button type="button" onclick="openNewProductModal()" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
@@ -693,6 +700,26 @@ include '../includes/header.php';
     <?php endif; ?>
 <?php endif; ?>
 
+<?php if ($canImportFinalCatalog): ?>
+<dialog id="importCatalogDialog" aria-labelledby="importCatalogTitle" class="catalog-dialog rounded-lg bg-white p-6 text-black shadow-xl dark:bg-gray-800 dark:text-gray-100">
+    <h2 id="importCatalogTitle" class="mb-3 text-lg font-bold">Load Final Product List</h2>
+    <p class="mb-4 text-sm">Load the approved 220 products and 425 stock batches, including their prices, dates, quantities and compatibility. Your accounts will be kept.</p>
+    <form method="POST" data-catalog-import>
+        <?php echo csrf_field(); ?><input type="hidden" name="import_final_catalog" value="1">
+        <p role="status" class="mb-4 text-sm" data-import-status></p>
+        <div class="flex justify-end gap-2"><button type="button" onclick="this.closest('dialog').close()" class="rounded border border-black px-4 py-2 text-sm dark:border-gray-600">Cancel</button><button type="submit" class="rounded border border-black px-4 py-2 text-sm dark:border-gray-600">Load Products</button></div>
+    </form>
+</dialog>
+<script>
+document.querySelector('[data-catalog-import]').addEventListener('submit', function(event) {
+    if (this.dataset.pending) { event.preventDefault(); return; }
+    this.dataset.pending = '1';
+    this.querySelector('[data-import-status]').textContent = 'Loading products and batches. Please wait…';
+    var form = this;
+    setTimeout(function() { form.querySelectorAll('button').forEach(function(button) { button.disabled = true; }); }, 0);
+});
+</script>
+<?php endif; ?>
 <?php if ($canManage) include '../includes/product_options_modal.php'; ?>
 
 <!-- Product Detail Modal -->

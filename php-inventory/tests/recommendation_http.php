@@ -112,6 +112,8 @@ try {
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 1, 'Upgrade must record completion once.');
     verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && !str_contains($inventory, 'openDuplicateProductModal'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
     $inlineToken = http_csrf($inventory);
+    http_request($base, 'pages/products.php', $cookies, ['csrf_token' => $inlineToken, 'import_final_catalog' => '1']);
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 3 && (int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch')->fetchColumn() === 2, 'Final catalog import must never overwrite a nonempty catalog.');
     [$status, $typeBody] = http_request($base, 'pages/product_type_create.php', $cookies, ['csrf_token' => $inlineToken, 'type_name' => 'Oil Filter']);
     $newType = json_decode($typeBody, true, 32, JSON_THROW_ON_ERROR)['type'];
     verify_http($status === 200 && $newType['type_name'] === 'Oil Filter', 'New product type must persist.');
@@ -185,6 +187,10 @@ try {
     verify_http((int) $pdo->query("SELECT COUNT(*) FROM Vehicle_Compatibility WHERE vehicle_name = 'Yamaha Mio'")->fetchColumn() === 1, 'Manager must persist new compatibility.');
     $unusedVehicleId = (int) $pdo->query("SELECT vehicle_id FROM Vehicle_Compatibility WHERE vehicle_name = 'Yamaha Mio'")->fetchColumn();
     $optionRequest('vehicle', 'delete', $unusedVehicleId);
+    [, $genericPos] = http_request($base, 'pages/pos.php?q=Honda', $cookies);
+    verify_http(!str_contains($genericPos, 'id="recPanel"'), 'Generic compatibility search must not open a recommendation panel.');
+    [, $inStockPos] = http_request($base, 'pages/pos.php?q=Dunlop%20Front%20Tire%20Plus', $cookies);
+    verify_http(!str_contains($inStockPos, 'id="recPanel"'), 'An available exact product must not open a recommendation panel.');
     [$status, $pos] = http_request($base, 'pages/pos.php?q=Dunlop%20Front%20Tire', $cookies);
     verify_http($status === 200 && str_contains($pos, 'id="recPanel"') && str_contains($pos, 'Alpha alternative'), 'POS must show recommendations despite available Plus variant.');
     [$status, $inventory] = http_request($base, 'pages/products.php', $cookies);
@@ -203,6 +209,9 @@ try {
     $cashierCookies = [];
     [, $login] = http_request($base, 'login.php', $cashierCookies);
     http_request($base, 'login.php', $cashierCookies, ['csrf_token' => http_csrf($login), 'email' => 'http-cashier', 'password' => 'local-test-only']);
+    [, $cashierInventory] = http_request($base, 'pages/products.php', $cashierCookies);
+    http_request($base, 'pages/products.php', $cashierCookies, ['csrf_token' => http_csrf($cashierInventory), 'import_final_catalog' => '1']);
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Products')->fetchColumn() === 3 && !str_contains($cashierInventory, 'Load Final Product List'), 'Cashiers must not access the final catalog loader.');
     [$status] = http_request($base, 'pages/product_options.php', $cashierCookies);
     verify_http($status === 302, 'Cashier must not access compatibility management.');
     [$status] = http_request($base, 'pages/vehicle_create.php', $cashierCookies, ['csrf_token' => 'invalid', 'vehicle_name' => 'Forbidden']);
@@ -237,6 +246,10 @@ try {
     verify_http($saleId > 0 && $pdo->query('SELECT reference_number FROM Sale WHERE sale_id = ' . $saleId)->fetchColumn() === $reference, 'GCash reference must persist with the sale.');
     [, $receipt] = http_request($base, 'pages/pos.php?receipt_id=' . $saleId, $cookies);
     verify_http(str_contains($receipt, 'GCash Reference No.: ' . $reference), 'Owned receipt must display the stored reference.');
+    [, $adminHistory] = http_request($base, 'pages/admin_dashboard.php', $cookies);
+    verify_http(str_contains($adminHistory, '&quot;reference&quot;:&quot;' . $reference . '&quot;') && str_contains($adminHistory, 'id="rm-reference-row"'), 'Dashboard history must retain GCash references after checkout.');
+    [, $cashierHistory] = http_request($base, 'pages/cashier_dashboard.php', $cashierCookies);
+    verify_http(!str_contains($cashierHistory, $reference), 'Other cashiers must not see the GCash reference in history.');
     [, $otherReceipt] = http_request($base, 'pages/pos.php?receipt_id=' . $saleId, $cashierCookies);
     verify_http(!str_contains($otherReceipt, $reference), 'Another cashier must not see a private receipt reference.');
     http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'add_to_cart' => '1', 'product_id' => '2', 'qty' => '1']);

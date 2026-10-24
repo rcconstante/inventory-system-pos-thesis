@@ -66,6 +66,14 @@ function tire_size_key(string $text): ?string
     return count($sizes) === 1 ? array_values($sizes)[0] : null;
 }
 
+function normalize_fitment_value(string $key, string $value): string
+{
+    $value = normalize_recommendation_attribute($value);
+    if ($key === 'voltage' && preg_match('/^([0-9]+(?:[.][0-9]+)?)\s*(?:v|volts?)?$/i', $value, $match)) return (string) (float) $match[1] . 'v';
+    if ($key === 'viscosity' && preg_match('/^([0-9]{1,2})\s*w\s*-?\s*([0-9]{2})$/i', $value, $match)) return $match[1] . 'w-' . $match[2];
+    return $value;
+}
+
 function essential_fitment_for_product(array $product): ?array
 {
     try {
@@ -76,14 +84,29 @@ function essential_fitment_for_product(array $product): ?array
     if (!is_array($fitment)) return null;
     $fitment = array_intersect_key($fitment, essential_fitment_fields());
     foreach ($fitment as $key => $value) {
-        if (!is_string($key) || !is_string($value)) return null;
-        $fitment[$key] = normalize_recommendation_attribute($value);
+        if (!is_string($value)) return null;
+        if (trim($value) === '') { unset($fitment[$key]); continue; }
+        $fitment[$key] = normalize_fitment_value($key, $value);
     }
-    if (preg_match('/\b(?:tires?|tyres?)\b/i', (string) ($product['product_type'] ?? ''))) {
-        $size = tire_size_key($fitment['size'] ?? (string) ($product['specification'] ?? ''));
+    $type = (string) ($product['product_type'] ?? '');
+    $specification = (string) ($product['specification'] ?? '');
+    if (preg_match('/\b(?:tires?|tyres?)\b/i', $type)) {
+        $size = tire_size_key($fitment['size'] ?? $specification);
         if ($size === null) return null;
         $fitment['size'] = $size;
     }
+    // Only known essential values are extracted; marketing words do not determine fitment.
+    foreach (['voltage' => '/(?<![0-9.])([0-9]+(?:[.][0-9]+)?)\s*(?:volts?|v)\b/i', 'viscosity' => '/\b([0-9]{1,2})\s*w\s*-?\s*([0-9]{2})\b/i'] as $key => $pattern) {
+        if (isset($fitment[$key])) continue;
+        preg_match_all($pattern, $specification, $matches, PREG_SET_ORDER);
+        $values = [];
+        foreach ($matches as $match) $values[] = normalize_fitment_value($key, $key === 'voltage' ? $match[1] : $match[1] . 'w-' . $match[2]);
+        $values = array_values(array_unique($values));
+        if (count($values) > 1) return null;
+        if ($values !== []) $fitment[$key] = $values[0];
+    }
+    if (preg_match('/battery/i', $type) && !isset($fitment['voltage'])) return null;
+    if (preg_match('/(?:engine|gear)\s*oil/i', $type) && !isset($fitment['viscosity'])) return null;
     return $fitment;
 }
 
@@ -95,11 +118,6 @@ function essential_fitment_matches(array $source, array $candidate): bool
     foreach ($required as $key => $value) {
         if ($key === 'position' && ($available[$key] ?? '') === 'front/rear' && in_array($value, ['front', 'rear', 'front/rear'], true)) continue;
         if (!isset($available[$key]) || $available[$key] !== $value) return false;
-    }
-    // Unmigrated non-tire products retain conservative behavior until requirements are entered.
-    if ($required === [] && trim((string) ($source['specification'] ?? '')) !== '') {
-        return normalize_recommendation_attribute($source['specification'])
-            === normalize_recommendation_attribute((string) ($candidate['specification'] ?? ''));
     }
     return true;
 }
@@ -213,22 +231,17 @@ function delete_product_option(PDO $pdo, string $kind, int $id): void
 function find_pos_recommendation_sources(PDO $pdo, string $term, int $categoryId): array
 {
     if (trim($term) === '') return [];
-    $query = "SELECT p.product_id, p.product_name,
-        COALESCE(stock.sellable_stock, 0) AS sellable_stock
-        FROM Products p LEFT JOIN Category c ON c.category_id = p.category_id
+    $codeId = preg_match('/^p0*([1-9][0-9]*)$/i', trim($term), $match) ? (int) $match[1] : 0;
+    $statement = $pdo->prepare("SELECT p.product_id
+        FROM Products p
         LEFT JOIN (SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
             WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
             AND (expiration_date IS NULL OR expiration_date >= CURDATE()) GROUP BY product_id) stock ON stock.product_id = p.product_id
         WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
         AND (? = 0 OR p.category_id = ?)
-        AND (p.product_name LIKE ? OR p.brand LIKE ? OR p.compatibility LIKE ? OR c.category_name LIKE ?)
-        ORDER BY p.product_id";
-    $like = '%' . str_replace(['=', '%', '_'], ['==', '=%', '=_'], $term) . '%';
-    $query = str_replace('LIKE ?', "LIKE ? ESCAPE '='", $query);
-    $statement = $pdo->prepare($query);
-    $statement->execute([$categoryId, $categoryId, $like, $like, $like, $like]);
-    $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-    $exact = array_filter($rows, static fn (array $row): bool => normalize_recommendation_attribute($row['product_name']) === normalize_recommendation_attribute($term));
-    $sources = $exact !== [] ? $exact : $rows;
-    return array_map(static fn (array $row): int => (int) $row['product_id'], array_values(array_filter($sources, static fn (array $row): bool => (int) $row['sellable_stock'] <= 0)));
+        AND ((? > 0 AND p.product_id = ?) OR (? = 0 AND LOWER(TRIM(p.product_name)) = ?))
+        AND COALESCE(stock.sellable_stock, 0) <= 0
+        ORDER BY p.product_id");
+    $statement->execute([$categoryId, $categoryId, $codeId, $codeId, $codeId, strtolower(trim($term))]);
+    return array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
 }

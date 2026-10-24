@@ -251,17 +251,18 @@ if ($selectedCategoryId > 0) {
 }
 
 if ($searchTerm !== '') {
-    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4)';
+    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4 OR p.product_id = :search_code)';
     $productParameters['st1'] = '%' . $searchTerm . '%';
     $productParameters['st2'] = '%' . $searchTerm . '%';
     $productParameters['st3'] = '%' . $searchTerm . '%';
     $productParameters['st4'] = '%' . $searchTerm . '%';
+    $productParameters['search_code'] = preg_match('/^p0*([1-9][0-9]*)$/i', $searchTerm, $codeMatch) ? (int) $codeMatch[1] : 0;
 }
 
 $productQuery .= ' ORDER BY p.product_name ASC';
 $productStatement = $pdo->prepare($productQuery);
 foreach ($productParameters as $parameter => $value) {
-    $productStatement->bindValue(':' . $parameter, $value, $parameter === 'category_id' ? PDO::PARAM_INT : PDO::PARAM_STR);
+    $productStatement->bindValue(':' . $parameter, $value, in_array($parameter, ['category_id', 'search_code'], true) ? PDO::PARAM_INT : PDO::PARAM_STR);
 }
 $productStatement->execute();
 $products = $productStatement->fetchAll(PDO::FETCH_ASSOC);
@@ -273,17 +274,10 @@ $showRecommendations = $sourceIds !== [];
 $recommendations = $showRecommendations
     ? fetch_recommendations_for_products($pdo, $sourceIds)
     : [];
-// Build a set of product IDs already visible in the main list (so we don't recommend duplicates)
-$inStockProductIds = array_flip(array_map('intval', array_column($products, 'product_id')));
-
 $flatRecommendations = [];
 foreach ($recommendations as $recList) {
     foreach ($recList as $rec) {
         $altId = (int) $rec['alternative_id'];
-        // Skip if this alternative is already in the main in-stock product list
-        if (isset($inStockProductIds[$altId])) {
-            continue;
-        }
         // Keep only the highest similarity_score when the same alternative appears for multiple source products
         if (!isset($flatRecommendations[$altId]) || (float) $rec['similarity_score'] > (float) $flatRecommendations[$altId]['similarity_score']) {
             $flatRecommendations[$altId] = $rec;
@@ -682,9 +676,10 @@ include '../includes/header.php';
     }
 
     function printReceipt() {
-        var receiptEl = document.querySelector('.fixed.inset-0.z-\\[110\\] .w-\\[500px\\]');
+        var receiptEl = document.querySelector('#posReceiptModal > div');
         if (!receiptEl) return;
         var printWin = window.open('', '_blank', 'width=500,height=700');
+        if (!printWin) { showToast('Allow pop-ups to print the receipt.', 'error'); return; }
         printWin.document.write('<html><head><title>Receipt</title><style>');
         printWin.document.write('body{font-family:monospace,sans-serif;margin:0;padding:20px;font-size:12px;color:#000}');
         printWin.document.write('table{width:100%;border-collapse:collapse}th,td{padding:6px 4px;text-align:left}');
@@ -818,7 +813,7 @@ include '../includes/header.php';
 
 <!-- Receipt Modal -->
 <?php if (isset($receiptSale) && $receiptSale): ?>
-<div class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+<div id="posReceiptModal" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
     <div class="w-[500px] bg-white dark:bg-gray-800 text-black dark:text-gray-100 border border-black dark:border-gray-600 shadow-2xl flex flex-col relative">
         <a href="<?php echo h(app_url('pages/pos.php')); ?>" class="absolute top-4 right-4 text-black dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>

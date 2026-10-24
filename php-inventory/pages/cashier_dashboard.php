@@ -127,7 +127,7 @@ if ($transactionPage > $totalPages) {
 }
 
 $transactionsStatement = $pdo->prepare(
-    "SELECT sale_id, payment_method, total_amount, status, `date`
+    "SELECT sale_id, payment_method, reference_number, total_amount, status, `date`
      FROM Sale
     WHERE user_id = :user_id
       AND DATE(`date`) BETWEEN :from AND :to
@@ -222,6 +222,7 @@ include '../includes/header.php';
                     'id' => $saleId,
                     'date' => date('F d, Y', strtotime($transaction['date'])),
                     'method' => $transaction['payment_method'],
+                    'reference' => $transaction['reference_number'],
                     'total' => $transaction['total_amount'],
                     'status' => strtoupper($transaction['status']),
                     'items' => $items
@@ -291,6 +292,7 @@ include '../includes/header.php';
         <div class="p-8 border-t border-black dark:border-gray-600 bg-white dark:bg-gray-800">
             <div class="text-sm font-bold mb-3 uppercase">TOTAL: <span id="rm-total"></span></div>
             <div class="text-sm font-bold mb-8 uppercase">PAID BY: <span id="rm-method"></span></div>
+            <div id="rm-reference-row" hidden class="text-sm font-bold mb-3">GCash Reference No.: <span id="rm-reference"></span></div>
             
             <div class="flex justify-between items-center">
                 <div class="text-sm font-medium">Thank You :)</div>
@@ -342,16 +344,19 @@ include '../includes/header.php';
         document.getElementById('rm-date').textContent = 'Date: ' + saleData.date;
         document.getElementById('rm-total').textContent = parseFloat(saleData.total).toFixed(2);
         document.getElementById('rm-method').textContent = saleData.method;
+        document.getElementById('rm-reference').textContent = saleData.reference || '';
+        document.getElementById('rm-reference-row').hidden = saleData.method !== 'GCASH' || !saleData.reference;
         
         const tbody = document.getElementById('rm-items');
         tbody.innerHTML = '';
         saleData.items.forEach(item => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="py-4 font-medium">${item.quantity}</td>
-                <td class="py-4 font-medium">${item.product_name}</td>
-                <td class="py-4 text-right font-medium">${parseFloat(item.subtotal).toFixed(2)}</td>
-            `;
+            [item.quantity, item.product_name, parseFloat(item.subtotal).toFixed(2)].forEach((value, index) => {
+                const td = document.createElement('td');
+                td.className = 'py-4 font-medium' + (index === 2 ? ' text-right' : '');
+                td.textContent = String(value);
+                tr.appendChild(td);
+            });
             tbody.appendChild(tr);
         });
         
@@ -386,9 +391,10 @@ include '../includes/header.php';
     }
 
     function printDashReceipt() {
-        var receiptEl = document.querySelector('#receiptModal .w-\\[500px\\]');
+        var receiptEl = document.querySelector('#receiptModal > div');
         if (!receiptEl) return;
         var printWin = window.open('', '_blank', 'width=500,height=700');
+        if (!printWin) { showToast('Allow pop-ups to print the receipt.', 'error'); return; }
         printWin.document.write('<html><head><title>Receipt</title><style>');
         printWin.document.write('body{font-family:monospace,sans-serif;margin:0;padding:20px;font-size:12px;color:#000}');
         printWin.document.write('table{width:100%;border-collapse:collapse}th,td{padding:6px 4px;text-align:left}');

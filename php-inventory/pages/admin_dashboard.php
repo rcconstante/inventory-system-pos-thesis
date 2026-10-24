@@ -130,7 +130,7 @@ if ($transactionPage > $totalPages) {
 }
 
 $transactionsStatement = $pdo->prepare(
-    "SELECT s.sale_id, s.payment_method, s.total_amount, s.status, s.`date`, u.full_name AS cashier_name
+    "SELECT s.sale_id, s.payment_method, s.reference_number, s.total_amount, s.status, s.`date`, u.full_name AS cashier_name
      FROM Sale s
      LEFT JOIN User u ON s.user_id = u.user_id
     WHERE DATE(s.`date`) BETWEEN :from AND :to
@@ -258,6 +258,7 @@ include '../includes/header.php';
                     'id' => $saleId,
                     'date' => date('F d, Y', strtotime($transaction['date'])),
                     'method' => $transaction['payment_method'],
+                    'reference' => $transaction['reference_number'],
                     'total' => $transaction['total_amount'],
                     'status' => strtoupper($transaction['status']),
                     'cashier' => $transaction['cashier_name'] ?? 'N/A',
@@ -322,6 +323,7 @@ include '../includes/header.php';
         <div class="p-8 border-t border-black dark:border-gray-600 bg-white dark:bg-gray-800">
             <div class="text-sm font-bold mb-3 uppercase">TOTAL: <span id="rm-total"></span></div>
             <div class="text-sm font-bold mb-3 uppercase">PAID BY: <span id="rm-method"></span></div>
+            <div id="rm-reference-row" hidden class="text-sm font-bold mb-3">GCash Reference No.: <span id="rm-reference"></span></div>
             <div class="text-sm font-bold mb-8 uppercase">CASHIER: <span id="rm-cashier"></span></div>
             <div class="flex justify-between items-center">
                 <div class="text-sm font-medium">Thank You :)</div>
@@ -369,12 +371,19 @@ include '../includes/header.php';
         document.getElementById('rm-date').textContent = 'Date: ' + saleData.date;
         document.getElementById('rm-total').textContent = parseFloat(saleData.total).toFixed(2);
         document.getElementById('rm-method').textContent = saleData.method;
+        document.getElementById('rm-reference').textContent = saleData.reference || '';
+        document.getElementById('rm-reference-row').hidden = saleData.method !== 'GCASH' || !saleData.reference;
         document.getElementById('rm-cashier').textContent = saleData.cashier || 'N/A';
         const tbody = document.getElementById('rm-items');
         tbody.innerHTML = '';
         saleData.items.forEach(item => {
             const tr = document.createElement('tr');
-            tr.innerHTML = '<td class="py-4 font-medium">' + item.quantity + '</td><td class="py-4 font-medium">' + item.product_name + '</td><td class="py-4 text-right font-medium">' + parseFloat(item.subtotal).toFixed(2) + '</td>';
+            [item.quantity, item.product_name, parseFloat(item.subtotal).toFixed(2)].forEach((value, index) => {
+                const td = document.createElement('td');
+                td.className = 'py-4 font-medium' + (index === 2 ? ' text-right' : '');
+                td.textContent = String(value);
+                tr.appendChild(td);
+            });
             tbody.appendChild(tr);
         });
         document.getElementById('rm-return-btn').style.display = saleData.status === 'RETURNED' ? 'none' : 'block';
@@ -397,9 +406,10 @@ include '../includes/header.php';
         document.getElementById('returnModal').classList.remove('flex');
     }
     function printDashReceipt() {
-        var el = document.querySelector('#receiptModal .w-\\[500px\\]');
+        var el = document.querySelector('#receiptModal > div');
         if (!el) return;
         var w = window.open('', '_blank', 'width=500,height=700');
+        if (!w) { showToast('Allow pop-ups to print the receipt.', 'error'); return; }
         w.document.write('<html><head><title>Receipt</title><style>body{font-family:monospace,sans-serif;margin:0;padding:20px;font-size:12px;color:#000}table{width:100%;border-collapse:collapse}th,td{padding:6px 4px;text-align:left}th{border-bottom:1px solid #000;font-weight:bold}td{border-bottom:1px dashed #ccc}.text-right{text-align:right}.font-bold,.font-medium{font-weight:bold}.text-sm{font-size:12px}.uppercase{text-transform:uppercase}@media print{button{display:none!important}}</style></head><body>');
         w.document.write(el.innerHTML);
         w.document.write('</body></html>');

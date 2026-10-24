@@ -43,6 +43,15 @@ check(is_eligible_product_alternative(array_replace($tire, ['essential_fitment' 
 check(!is_eligible_product_alternative(array_replace($tire, ['essential_fitment' => '{"position":"front"}']), array_replace($tire, ['essential_fitment' => '{"position":"rear"}'])), 'Required position mismatch must exclude candidate.');
 check(parse_essential_fitment(['size' => '80/90-14', 'position' => 'front']) === ['position' => 'front', 'size' => '80/90-14'], 'Structured fitment must parse and sort consistently.');
 try { parse_essential_fitment(['unknown' => 'value']); check(false, 'Unknown fields must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'Invalid'), 'Unknown fitment fields rejected.'); }
+$oil = array_replace($tire, ['product_type' => 'Engine Oil', 'specification' => 'Premium SAE 10W-40 engine oil']);
+check(is_eligible_product_alternative($oil, array_replace($oil, ['specification' => 'Synthetic lubricant, 10 w 40, 1L bottle'])), 'Oil descriptive wording must not require exact text.');
+check(!is_eligible_product_alternative($oil, array_replace($oil, ['specification' => '20W-50 engine oil'])), 'Wrong viscosity must be excluded.');
+check(!is_eligible_product_alternative($oil, array_replace($oil, ['specification' => 'Engine lubricant'])), 'Missing required viscosity must be excluded.');
+$battery = array_replace($tire, ['product_type' => 'Battery', 'specification' => 'Maintenance-free 12 Volts']);
+check(is_eligible_product_alternative($battery, array_replace($battery, ['specification' => 'Sealed 12V battery'])), 'Voltage units and descriptive words must be normalized.');
+check(!is_eligible_product_alternative($battery, array_replace($battery, ['specification' => '24V battery'])), 'Wrong voltage must be excluded.');
+$pad = array_replace($tire, ['product_type' => 'Front Brake Pad', 'specification' => 'Long-lasting friction material']);
+check(is_eligible_product_alternative($pad, array_replace($pad, ['specification' => 'Premium ceramic brake pad'])), 'Nonessential description must not be an exact-text eligibility gate.');
 [$score] = calculate_product_similarity($tire, $tire);
 check($score === 0.85, 'Existing weights must remain unchanged; short numeric tokens do not add specification points.');
 [$fullScore] = calculate_product_similarity(array_replace($tire, ['specification' => 'tubeless radial reinforced']), array_replace($tire, ['specification' => 'tubeless radial reinforced']));
@@ -107,15 +116,17 @@ if ($dsn !== false && $dsn !== '') {
         $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 2)');
         $pdo->exec("INSERT INTO Feature_Based_Match (product_id, alternative_product_id, similarity_score, matched_attribute) SELECT 1, product_id, 0.90, 'compatibility' FROM Products WHERE product_id BETWEEN 2 AND 9 OR product_id IN (12, 13)");
         $legacy = fetch_recommendations_for_products($pdo, [1]);
-        check(array_column($legacy[1], 'alternative_id') === [9, 8, 7], 'Legacy cache must filter invalid, archived, unavailable, expired and disposed alternatives immediately.');
+        check(array_column($legacy[1], 'alternative_id') === [9, 8, 7, 10], 'Legacy cache must filter invalid, archived, unavailable, expired and disposed alternatives immediately.');
         sync_feature_matches_for_catalog($pdo);
         $results = fetch_recommendations_for_products($pdo, [1, 1, 11, 999999]);
         check(array_column($results[1], 'alternative_id') === [9, 8, 7, 10], 'Database results must follow eligibility and full ranking.');
         $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire' WHERE product_id = 1");
         $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire Plus' WHERE product_id = 7");
         check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 0) === [1], 'Exact out-of-stock product must be a recommendation source even when Plus is available.');
+        check(find_pos_recommendation_sources($pdo, 'P0001', 0) === [1], 'Product codes must select the exact out-of-stock variant.');
+        check(find_pos_recommendation_sources($pdo, 'P0007', 0) === [], 'An in-stock product code must not open recommendations.');
         check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire Plus', 0) === [], 'Exact available product must not trigger unrelated out-of-stock sources.');
-        check(find_pos_recommendation_sources($pdo, 'Dunlop', 0) === [1], 'Broad search must include out-of-stock sources alongside available matches.');
+        check(find_pos_recommendation_sources($pdo, 'Dunlop', 0) === [], 'Generic brand search must not open recommendations.');
         check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 2) === [], 'POS recommendation sources must obey category filter.');
         check(find_pos_recommendation_sources($pdo, '%', 0) === [], 'Search wildcards must be treated literally.');
         $pdo->beginTransaction();
