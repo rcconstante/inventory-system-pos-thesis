@@ -19,6 +19,15 @@ $tire = [
     'specification' => '80/90-14', 'description' => '', 'brand' => 'Example',
 ];
 check(is_eligible_product_alternative($tire, $tire), 'Matching tire should qualify.');
+$multiModelTire = array_replace($tire, ['compatibility' => 'Honda Click 125, Yamaha Mio']);
+check(is_eligible_product_alternative($multiModelTire, $tire, 'Honda Click 125'), 'One exact customer model is enough despite different full compatibility lists.');
+check(!is_eligible_product_alternative($multiModelTire, $tire, 'Yamaha Mio'), 'Alternative must support the actual customer model.');
+check(!is_eligible_product_alternative($tire, $multiModelTire, 'Yamaha Mio'), 'Source must also support the selected customer model.');
+check(!is_eligible_product_alternative($multiModelTire, array_replace($tire, ['specification' => '90/90-14']), 'Honda Click 125'), 'Selected model must not bypass essential size checks.');
+check(!is_eligible_product_alternative($multiModelTire, array_replace($tire, ['category_id' => 2]), 'Honda Click 125'), 'Selected model must not bypass category checks.');
+check(!is_eligible_product_alternative($multiModelTire, array_replace($tire, ['product_type' => 'Brake Pad']), 'Honda Click 125'), 'Selected model must not bypass type checks.');
+check(is_eligible_product_alternative($multiModelTire, array_replace($tire, ['compatibility' => 'Universal']), 'Honda Click 125'), 'Universal alternatives can support a specific customer model.');
+check(!product_supports_motorcycle_model($tire, 'Click'), 'Model names must not be guessed from shared words.');
 check(!is_eligible_product_alternative($tire, array_replace($tire, ['category_id' => 2])), 'Cross-category battery must not qualify.');
 check(!is_eligible_product_alternative($tire, array_replace($tire, ['product_type' => 'Battery'])), 'Different type within a broad category must not qualify.');
 check(!is_eligible_product_alternative($tire, array_replace($tire, ['specification' => '90/90-14'])), 'Different tire size must not qualify.');
@@ -145,6 +154,21 @@ if ($dsn !== false && $dsn !== '') {
         try { save_product_vehicles($pdo, 9, [$vehicleId, $universalId]); check(false, 'Mixed Universal selection must fail.'); } catch (RuntimeException $exception) { check(str_contains($exception->getMessage(), 'alone'), 'Universal cannot be mixed with specific models.'); }
         save_product_vehicles($pdo, 1, []);
         check((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = 1')->fetchColumn() === 0, 'Removing mistaken compatibility selection must remove mapping.');
+        $pdo->rollBack();
+        $pdo->beginTransaction();
+        $customerVehicleId = save_vehicle_option($pdo, null, 'Honda Click 125');
+        $otherVehicleId = save_vehicle_option($pdo, null, 'Yamaha Mio');
+        save_product_vehicles($pdo, 1, [$customerVehicleId, $otherVehicleId]);
+        check(fetch_recommendations_for_products($pdo, [1]) === [], 'Global cache must not broaden to partial model coverage.');
+        $modelResults = fetch_recommendations_for_products($pdo, [1], $customerVehicleId);
+        check(array_column($modelResults[1] ?? [], 'alternative_id') === [9, 8, 7, 10], 'Selected model must allow one shared model, preserve ranking, and exclude wrong fitment, category, unavailable batches and archives.');
+        check(str_contains($modelResults[1][0]['matched_attribute'], 'compatibility'), 'Verified customer compatibility contributes its existing weight.');
+        check(fetch_recommendations_for_products($pdo, [1], $otherVehicleId) === [], 'Different selected model excludes incompatible candidates.');
+        check(fetch_recommendations_for_products($pdo, [1], 999999) === [], 'Unknown model must not fall back to global alternatives.');
+        $universalCustomerId = save_vehicle_option($pdo, null, 'Universal');
+        check(fetch_recommendations_for_products($pdo, [1], $universalCustomerId) === [], 'Universal is not a concrete customer motorcycle model.');
+        $pdo->prepare('UPDATE Vehicle_Compatibility SET is_active = 0 WHERE vehicle_id = ?')->execute([$customerVehicleId]);
+        check(fetch_recommendations_for_products($pdo, [1], $customerVehicleId) === [], 'Inactive selected model must not produce alternatives.');
         $pdo->rollBack();
         check(!isset($results[11]) && !isset($results[999999]), 'No suitable alternatives must return an empty result.');
         check(fetch_recommendations_for_products($pdo, []) === [], 'Empty source list must return no recommendations.');

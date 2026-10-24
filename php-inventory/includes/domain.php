@@ -267,7 +267,14 @@ function normalize_recommendation_attribute(string $value): string
     return strtolower(trim(preg_replace('/\s+/', ' ', $value) ?? $value));
 }
 
-function is_eligible_product_alternative(array $source, array $candidate): bool
+function product_supports_motorcycle_model(array $product, string $model): bool
+{
+    $key = vehicle_name_key($model);
+    $models = array_map('vehicle_name_key', explode(',', (string) ($product['compatibility'] ?? '')));
+    return $key !== '' && (in_array($key, $models, true) || in_array('universal', $models, true));
+}
+
+function is_eligible_product_alternative(array $source, array $candidate, ?string $customerModel = null): bool
 {
     if ((int) ($source['category_id'] ?? 0) <= 0
         || (int) $source['category_id'] !== (int) ($candidate['category_id'] ?? 0)) {
@@ -277,6 +284,12 @@ function is_eligible_product_alternative(array $source, array $candidate): bool
     $sourceType = normalize_recommendation_attribute((string) ($source['product_type'] ?? ''));
     if ($sourceType === '' || $sourceType !== normalize_recommendation_attribute((string) ($candidate['product_type'] ?? ''))) {
         return false;
+    }
+
+    if ($customerModel !== null) {
+        return product_supports_motorcycle_model($source, $customerModel)
+            && product_supports_motorcycle_model($candidate, $customerModel)
+            && essential_fitment_matches($source, $candidate);
     }
 
     $sourceCompatibility = normalize_recommendation_attribute((string) ($source['compatibility'] ?? ''));
@@ -395,7 +408,66 @@ function ensure_feature_matches_synced(PDO $pdo): void
     }
 }
 
-function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
+function fetch_model_recommendations(PDO $pdo, array $productIds, int $vehicleId): array
+{
+    $modelStatement = $pdo->prepare('SELECT vehicle_name FROM Vehicle_Compatibility WHERE vehicle_id = ? AND is_active = 1');
+    $modelStatement->execute([$vehicleId]);
+    $model = $modelStatement->fetchColumn();
+    if (!$model || vehicle_name_key($model) === 'universal') {
+        return [];
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($productIds), '?'));
+    $sourceStatement = $pdo->prepare("SELECT * FROM Products WHERE product_id IN ($placeholders) AND COALESCE(product_status, 'ACTIVE') = 'ACTIVE'");
+    $sourceStatement->execute($productIds);
+    $sources = $sourceStatement->fetchAll(PDO::FETCH_ASSOC);
+    if ($sources === []) {
+        return [];
+    }
+    $categoryIds = array_values(array_unique(array_column($sources, 'category_id')));
+    $categoryPlaceholders = implode(', ', array_fill(0, count($categoryIds), '?'));
+    $candidatesStatement = $pdo->prepare("SELECT p.*, stock.sellable_stock AS alternative_stock
+        FROM Products p INNER JOIN (
+            SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
+            WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
+                AND (expiration_date IS NULL OR expiration_date >= CURDATE())
+            GROUP BY product_id
+        ) stock ON stock.product_id = p.product_id
+        WHERE p.category_id IN ($categoryPlaceholders) AND COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'");
+    $candidatesStatement->execute($categoryIds);
+    $candidates = $candidatesStatement->fetchAll(PDO::FETCH_ASSOC);
+    $results = [];
+    foreach ($sources as $source) {
+        foreach ($candidates as $candidate) {
+            if ((int) $source['product_id'] === (int) $candidate['product_id']
+                || !is_eligible_product_alternative($source, $candidate, $model)) {
+                continue;
+            }
+            // Score compatibility against the customer's verified model, not unrelated models.
+            $scoredSource = array_replace($source, ['compatibility' => $model, 'brand' => (string) ($source['brand'] ?? '')]);
+            $scoredCandidate = array_replace($candidate, ['compatibility' => $model, 'brand' => (string) ($candidate['brand'] ?? '')]);
+            [$score, $attributes] = calculate_product_similarity($scoredSource, $scoredCandidate);
+            if ($score < 0.20) {
+                continue;
+            }
+            $results[(int) $source['product_id']][] = array_replace($candidate, [
+                'product_id' => (int) $source['product_id'],
+                'alternative_id' => (int) $candidate['product_id'],
+                'alternative_name' => $candidate['product_name'],
+                'alternative_brand' => $candidate['brand'] ?? '',
+                'similarity_score' => $score,
+                'matched_attribute' => $attributes,
+            ]);
+        }
+    }
+    foreach ($results as &$rows) {
+        usort($rows, 'compare_product_recommendations');
+    }
+    unset($rows);
+    return $results;
+}
+
+function fetch_recommendations_for_products(PDO $pdo, array $productIds, ?int $vehicleId = null): array
 {
     $productIds = array_values(array_unique(array_map('intval', $productIds)));
     if ($productIds === []) {
@@ -403,6 +475,9 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds): array
     }
 
     ensure_product_lifecycle_schema($pdo);
+    if ($vehicleId !== null) {
+        return fetch_model_recommendations($pdo, $productIds, $vehicleId);
+    }
     ensure_feature_matches_synced($pdo);
 
     $placeholders = implode(', ', array_fill(0, count($productIds), '?'));

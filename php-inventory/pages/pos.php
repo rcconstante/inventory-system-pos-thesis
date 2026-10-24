@@ -211,8 +211,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_to('pages/pos.php' . ($qs !== '' ? '?' . $qs : ''));
 }
 
-$searchTerm = trim((string) ($_GET['q'] ?? ''));
-$selectedCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
+$searchTerm = is_string($_GET['q'] ?? '') ? trim($_GET['q'] ?? '') : '';
+$selectedCategoryId = is_scalar($_GET['category_id'] ?? 0) ? max(0, (int) ($_GET['category_id'] ?? 0)) : 0;
+$vehicleOptions = array_values(array_filter(fetch_vehicle_options($pdo), static fn (array $vehicle): bool =>
+    (int) $vehicle['is_active'] === 1 && vehicle_name_key($vehicle['vehicle_name']) !== 'universal'
+));
+$vehicleInput = $_GET['vehicle_id'] ?? '0';
+$vehicleId = is_scalar($vehicleInput) ? filter_var($vehicleInput, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) : false;
+$selectedVehicle = null;
+foreach ($vehicleOptions as $vehicle) {
+    if ((int) $vehicle['vehicle_id'] === $vehicleId) {
+        $selectedVehicle = $vehicle;
+        break;
+    }
+}
+$invalidVehicle = $vehicleId === false || ($vehicleId > 0 && $selectedVehicle === null);
+$posAction = app_url('pages/pos.php?' . http_build_query([
+    'q' => $searchTerm, 'category_id' => $selectedCategoryId, 'vehicle_id' => $vehicleId === false ? -1 : $vehicleId,
+]));
 
 $categoriesStatement = $pdo->query('SELECT category_id, category_name FROM Category ORDER BY category_name ASC');
 $categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
@@ -220,6 +236,7 @@ $categories = $categoriesStatement->fetchAll(PDO::FETCH_ASSOC);
 $productQuery = "
     SELECT
         p.product_id,
+        p.display_code,
         p.product_name,
         COALESCE(p.brand, '') AS brand,
         COALESCE(p.product_type, '') AS product_type,
@@ -271,8 +288,8 @@ $sourceIds = recommendations_enabled()
     ? find_pos_recommendation_sources($pdo, $searchTerm, $selectedCategoryId)
     : [];
 $showRecommendations = $sourceIds !== [];
-$recommendations = $showRecommendations
-    ? fetch_recommendations_for_products($pdo, $sourceIds)
+$recommendations = $showRecommendations && !$invalidVehicle
+    ? fetch_recommendations_for_products($pdo, $sourceIds, $selectedVehicle ? (int) $selectedVehicle['vehicle_id'] : null)
     : [];
 $flatRecommendations = [];
 foreach ($recommendations as $recList) {
@@ -337,6 +354,16 @@ include '../includes/header.php';
                          </option>
                      <?php endforeach; ?>
                  </select>
+                 <div class="flex flex-col gap-1 min-w-0">
+                     <label for="pos-vehicle-id" class="text-xs font-medium text-black dark:text-white">Customer motorcycle model</label>
+                     <select id="pos-vehicle-id" name="vehicle_id" aria-describedby="pos-model-help" class="w-full max-w-[280px] rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-black dark:text-white">
+                         <option value="0">Select motorcycle model</option>
+                         <?php if ($invalidVehicle): ?><option value="-1" selected>Choose an available model</option><?php endif; ?>
+                         <?php foreach ($vehicleOptions as $vehicle): ?>
+                             <option value="<?php echo (int) $vehicle['vehicle_id']; ?>" <?php echo $selectedVehicle && (int) $selectedVehicle['vehicle_id'] === (int) $vehicle['vehicle_id'] ? 'selected' : ''; ?>><?php echo h($vehicle['vehicle_name']); ?></option>
+                         <?php endforeach; ?>
+                     </select>
+                 </div>
                  <div class="relative min-w-[280px] flex-1">
                      <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-black dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -344,6 +371,7 @@ include '../includes/header.php';
                      <input type="text" name="q" value="<?php echo h($searchTerm); ?>" placeholder="Search product, brand, compatibility, or category" class="w-full rounded border border-black dark:border-gray-600 bg-transparent pl-14 pr-4 py-3 text-base focus:ring-0 dark:bg-gray-800 dark:text-white placeholder-gray-400 outline-none">
                  </div>
              </form>
+             <p id="pos-model-help" class="px-4 pb-3 text-xs text-gray-600 dark:text-gray-300"><?php echo $invalidVehicle ? 'That motorcycle model is unavailable. Select an active model to check alternatives.' : 'Select the customer’s model for model-specific alternatives. Without a selection, alternatives must cover all models of the original product.'; ?></p>
         </div>
         
         <!-- Table -->
@@ -377,7 +405,7 @@ include '../includes/header.php';
                             <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
                             <td class="py-4 px-4 text-sm">
                                 <div class="flex gap-2">
-                                    <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline m-0">
+                                    <form method="POST" action="<?php echo h($posAction); ?>" class="inline m-0">
                                         <?php echo csrf_field(); ?>
                                         <input type="hidden" name="product_id" value="<?php echo (int)$product['product_id']; ?>">
                                         <input type="hidden" name="qty" value="1">
@@ -410,6 +438,7 @@ include '../includes/header.php';
     <div id="recPanel" class="flex flex-col bg-white dark:bg-gray-900 flex-shrink-0" style="width:450px;">
         <div class="p-6 border-b border-black dark:border-black">
             <h2 class="text-[15px] font-bold uppercase tracking-wide truncate">RECOMMENDATION FOR : <?php echo h($searchTerm); ?></h2>
+            <?php if ($selectedVehicle): ?><p class="mt-2 text-sm text-gray-600 dark:text-gray-300">For <?php echo h($selectedVehicle['vehicle_name']); ?></p><?php endif; ?>
         </div>
         <div class="py-3 px-6 border-b border-black dark:border-black">
             <span class="font-bold text-sm tracking-wide">Featured Based</span>
@@ -433,7 +462,7 @@ include '../includes/header.php';
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                     <?php if (empty($flatRecommendations)): ?>
-                        <tr><td colspan="4" class="py-8 text-center text-sm text-gray-500">No suitable alternative available</td></tr>
+                        <tr><td colspan="4" class="py-8 px-4 text-center text-sm text-gray-500"><?php echo $invalidVehicle ? 'Select an available motorcycle model to check alternatives.' : 'No suitable alternative available'; ?></td></tr>
                     <?php else: ?>
                         <?php foreach ($flatRecommendations as $rec): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -441,7 +470,7 @@ include '../includes/header.php';
                             <td class="py-3 px-4 text-sm truncate" title="<?php echo h($rec['alternative_brand'] ?? ''); ?>"><?php echo h($rec['alternative_brand'] ?: 'N/A'); ?></td>
                             <td class="py-3 px-4 text-sm text-right font-medium">&#8369;<?php echo h(number_format((float)($rec['price'] ?? 0), 0)); ?></td>
                             <td class="py-3 px-4 text-sm text-center">
-                                <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline-flex items-center gap-1">
+                                <form method="POST" action="<?php echo h($posAction); ?>" class="inline-flex items-center gap-1">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="product_id" value="<?php echo h((string)$rec['alternative_id']); ?>">
                                     <input type="hidden" name="qty" value="1">
@@ -508,7 +537,7 @@ include '../includes/header.php';
             </ul>
         </div>
         <div class="p-6 border-t border-black dark:border-black flex justify-center gap-6">
-            <form id="specsAddForm" method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" class="inline">
+            <form id="specsAddForm" method="POST" action="<?php echo h($posAction); ?>" class="inline">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" id="specsProductId" name="product_id" value="">
                 <input type="hidden" name="qty" value="1">
@@ -662,7 +691,7 @@ include '../includes/header.php';
         <!-- Bottom Buttons -->
         <div class="flex justify-end gap-4 mt-6">
             <button type="button" onclick="closeCheckoutPage()" class="border border-black dark:border-white px-8 py-2 uppercase hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-bold bg-white dark:bg-gray-800 text-sm tracking-wide">BACK</button>
-            <form method="POST" action="<?php echo h(app_url('pages/pos.php')); ?>" id="checkoutForm" onsubmit="return validateCheckout()">
+            <form method="POST" action="<?php echo h($posAction); ?>" id="checkoutForm" onsubmit="return validateCheckout()">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="checkout" value="1">
                 <input type="hidden" name="payment_method" id="selectedPaymentMethod" value="CASH">
@@ -892,7 +921,8 @@ include '../includes/header.php';
                 }
             });
             document.addEventListener('change', function(e) {
-                if (e.target && e.target.name === 'category_id' && e.target.closest('#pos-main-view')) {
+                if (e.target && ['category_id', 'vehicle_id'].includes(e.target.name) && e.target.closest('#pos-main-view')) {
+                    clearTimeout(window._posSearchTimer);
                     if (e.target.form) {
                         e.target.form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
                     }
@@ -976,10 +1006,16 @@ include '../includes/header.php';
                         }
                         window.history.pushState({}, '', url.toString());
 
-                        var resp = await fetch(url.toString());
+                        if (window._posSearchController) window._posSearchController.abort();
+                        window._posSearchController = new AbortController();
+                        var searchController = window._posSearchController;
+                        var resp = await fetch(url.toString(), { signal: searchController.signal });
                         if (!resp.ok) { form.submit(); return; }
-                        applyMorphdom(await resp.text(), activeEl, wasDarkMode);
+                        var html = await resp.text();
+                        if (searchController.signal.aborted) return;
+                        applyMorphdom(html, activeEl, wasDarkMode);
                     } else {
+                        if (window._posSearchController) window._posSearchController.abort();
                         // POST: send the action with redirect:manual so the flash message
                         // stays in session (redirect:follow would consume it silently)
                         await fetch(formAction, {
@@ -1010,6 +1046,7 @@ include '../includes/header.php';
                         }
                     }
                 } catch (err) {
+                    if (err.name === 'AbortError') return;
                     console.error('POS AJAX error:', err);
                     window.location.reload();
                 }
