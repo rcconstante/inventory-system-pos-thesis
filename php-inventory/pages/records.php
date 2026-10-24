@@ -43,6 +43,7 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
             p.product_id,
+            p.display_code,
             c.category_name,
             p.product_name,
             p.brand,
@@ -53,7 +54,7 @@ if ($activeTab === 'top_selling') {
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
          WHERE s.status = 'COMPLETED' AND " . implode(' AND ', $salesFilters) . "
-         GROUP BY p.product_id, c.category_name, p.product_name, p.brand
+         GROUP BY p.product_id, p.display_code, c.category_name, p.product_name, p.brand
          ORDER BY total_quantity DESC, total_amount DESC, p.product_name ASC"
     );
     $statement->execute($queryParameters);
@@ -63,6 +64,7 @@ if ($activeTab === 'top_selling') {
         "SELECT
             s.sale_id,
             p.product_id,
+            p.display_code,
             c.category_name,
             p.product_name,
             p.brand,
@@ -82,6 +84,7 @@ if ($activeTab === 'top_selling') {
         "SELECT
             s.sale_id,
             p.product_id,
+            p.display_code,
             c.category_name,
             p.product_name,
             p.brand,
@@ -102,6 +105,7 @@ if ($activeTab === 'top_selling') {
         "SELECT
             ra.reorder_id,
             p.product_id,
+            p.display_code,
             c.category_name,
             p.product_name,
             COALESCE(p.brand, '') AS brand,
@@ -203,7 +207,7 @@ include '../includes/header.php';
             <?php if ($activeTab === 'critical_stocks'): ?>
                 <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
-                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
+                    <div><?php echo h(format_product_code($record)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
@@ -213,7 +217,7 @@ include '../includes/header.php';
             <?php elseif ($activeTab === 'cancelled_orders'): ?>
                 <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
-                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
+                    <div><?php echo h(format_product_code($record)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
@@ -223,7 +227,7 @@ include '../includes/header.php';
             <?php else: ?>
                 <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
                     <div><?php echo h((string) ($index + 1)); ?></div>
-                    <div><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></div>
+                    <div><?php echo h(format_product_code($record)); ?></div>
                     <div><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></div>
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
@@ -471,7 +475,7 @@ include '../includes/header.php';
                     <?php foreach ($records as $index => $record): ?>
                         <tr>
                             <td><?php echo h((string) ($index + 1)); ?></td>
-                            <td><?php echo h(str_pad((string) ($record['product_id'] ?? ''), 3, '0', STR_PAD_LEFT)); ?></td>
+                            <td><?php echo h(format_product_code($record)); ?></td>
                             <td><?php echo h($record['category_name'] ?? 'Uncategorized'); ?></td>
                             <td><?php echo h($record['product_name']); ?></td>
                             <td><?php echo h(($record['brand'] ?? '') !== '' ? $record['brand'] : 'N/A'); ?></td>

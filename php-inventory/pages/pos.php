@@ -251,7 +251,7 @@ if ($selectedCategoryId > 0) {
 }
 
 if ($searchTerm !== '') {
-    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4 OR p.product_id = :search_code)';
+    $productQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR c.category_name LIKE :st4 OR p.display_code = :search_code)';
     $productParameters['st1'] = '%' . $searchTerm . '%';
     $productParameters['st2'] = '%' . $searchTerm . '%';
     $productParameters['st3'] = '%' . $searchTerm . '%';
@@ -259,7 +259,7 @@ if ($searchTerm !== '') {
     $productParameters['search_code'] = preg_match('/^p0*([1-9][0-9]*)$/i', $searchTerm, $codeMatch) ? (int) $codeMatch[1] : 0;
 }
 
-$productQuery .= ' ORDER BY p.product_name ASC';
+$productQuery .= ' ORDER BY p.display_code ASC, p.product_id ASC';
 $productStatement = $pdo->prepare($productQuery);
 foreach ($productParameters as $parameter => $value) {
     $productStatement->bindValue(':' . $parameter, $value, in_array($parameter, ['category_id', 'search_code'], true) ? PDO::PARAM_INT : PDO::PARAM_STR);
@@ -303,6 +303,12 @@ if (isset($_GET['receipt_id'])) {
 }
 
 $cart = $_SESSION['cart'] ?? [];
+if ($cart !== []) {
+    $cartIds = array_map('intval', array_keys($cart));
+    $cartCodes = $pdo->prepare('SELECT product_id, display_code FROM Products WHERE product_id IN (' . implode(',', array_fill(0, count($cartIds), '?')) . ')');
+    $cartCodes->execute($cartIds);
+    foreach ($cartCodes->fetchAll(PDO::FETCH_ASSOC) as $code) $cart[(int) $code['product_id']]['display_code'] = $code['display_code'];
+}
 $totalDue = 0.0;
 foreach ($cart as $cartItem) {
     $totalDue += (float)($cartItem['price'] ?? 0) * (int)($cartItem['qty'] ?? 0);
@@ -365,7 +371,7 @@ include '../includes/header.php';
                     <?php $no = 1; foreach ($products as $product): ?>
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                             <td class="py-4 px-6 text-sm"><?php echo $no++; ?></td>
-                            <td class="py-4 px-6 text-sm font-medium">P<?php echo str_pad((string)$product['product_id'], 4, '0', STR_PAD_LEFT); ?></td>
+                            <td class="py-4 px-6 text-sm font-medium"><?php echo h(format_product_code($product)); ?></td>
                             <td class="py-4 px-6 text-sm truncate"><?php echo h($product['product_name']); ?></td>
                             <td class="py-4 px-6 text-sm truncate"><?php echo h($product['category_name']); ?></td>
                             <td class="py-4 px-6 text-sm"><?php echo h((string)round((float)$product['price'])); ?></td>
@@ -594,7 +600,7 @@ include '../includes/header.php';
                     $itemTotal = (float)$item['price'] * (int)$item['qty'];
                 ?>
                 <tr>
-                    <td class="py-3 px-4 border border-black dark:border-white">P<?php echo str_pad((string)$pid, 4, '0', STR_PAD_LEFT); ?></td>
+                    <td class="py-3 px-4 border border-black dark:border-white"><?php echo h(format_product_code(['product_id' => $pid, 'display_code' => $item['display_code'] ?? null])); ?></td>
                     <td class="py-3 px-4 border border-black dark:border-white truncate"><?php echo h($item['name']); ?></td>
                     <td class="py-3 px-4 border border-black dark:border-white">&#8369;<?php echo number_format((float)$item['price'], 2); ?></td>
                     <td class="py-3 px-4 border border-black dark:border-white">

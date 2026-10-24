@@ -124,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $productId = (int) $pdo->lastInsertId();
+                assign_product_display_code($pdo, $productId);
 
                 $insertInventory = $pdo->prepare(
                     'INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date)
@@ -352,17 +353,18 @@ if ($selectedCategoryId > 0) {
     $queryParams['category_id'] = $selectedCategoryId;
 }
 if ($searchTerm !== '') {
-    $countQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5)';
+    $countQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5 OR p.display_code = :search_code)';
     $queryParams['st1'] = '%' . $searchTerm . '%';
     $queryParams['st2'] = '%' . $searchTerm . '%';
     $queryParams['st3'] = '%' . $searchTerm . '%';
     $queryParams['st4'] = '%' . $searchTerm . '%';
     $queryParams['st5'] = '%' . $searchTerm . '%';
+    $queryParams['search_code'] = preg_match('/^p0*([1-9][0-9]*)$/i', $searchTerm, $codeMatch) ? (int) $codeMatch[1] : 0;
 }
 $countStmt = $pdo->prepare($countQuery);
 foreach ($queryParams as $param => $value) {
-    if ($param === 'category_id') {
-        $countStmt->bindValue(':category_id', $value, PDO::PARAM_INT);
+    if (in_array($param, ['category_id', 'search_code'], true)) {
+        $countStmt->bindValue(':' . $param, $value, PDO::PARAM_INT);
     } else {
         $countStmt->bindValue(':' . $param, $value, PDO::PARAM_STR);
     }
@@ -400,14 +402,14 @@ if ($selectedCategoryId > 0) {
     $productsQuery .= ' AND p.category_id = :category_id';
 }
 if ($searchTerm !== '') {
-    $productsQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5)';
+    $productsQuery .= ' AND (p.product_name LIKE :st1 OR p.brand LIKE :st2 OR p.compatibility LIKE :st3 OR p.specification LIKE :st4 OR c.category_name LIKE :st5 OR p.display_code = :search_code)';
 }
 
-$productsQuery .= ' ORDER BY p.product_name ASC LIMIT :limit OFFSET :offset';
+$productsQuery .= ' ORDER BY p.display_code ASC, p.product_id ASC LIMIT :limit OFFSET :offset';
 $productsStatement = $pdo->prepare($productsQuery);
 foreach ($queryParams as $param => $value) {
-    if ($param === 'category_id') {
-        $productsStatement->bindValue(':category_id', $value, PDO::PARAM_INT);
+    if (in_array($param, ['category_id', 'search_code'], true)) {
+        $productsStatement->bindValue(':' . $param, $value, PDO::PARAM_INT);
     } else {
         $productsStatement->bindValue(':' . $param, $value, PDO::PARAM_STR);
     }
@@ -439,6 +441,7 @@ try {
         $statusLabel = ($salesCount > 0 && $salesCount >= $avgSalesCount) ? 'FAST MOVING' : 'SLOW MOVING';
         return [
             'id' => (int)$p['product_id'],
+            'code' => format_product_code($p),
             'name' => $p['product_name'],
             'brand' => $p['brand'] ?? '',
             'category' => $p['category_name'] ?? 'N/A',
@@ -525,7 +528,7 @@ include '../includes/header.php';
         <table class="w-full min-w-[760px] border-collapse border border-black dark:border-gray-600 text-sm">
         <thead>
             <tr class="text-sm font-bold uppercase text-gray-700 dark:text-gray-300">
-                <th class="border border-black dark:border-gray-600 p-4 w-[100px] text-center">PRODUCT ID</th>
+                <th class="border border-black dark:border-gray-600 p-4 w-[100px] text-center">PRODUCT CODE</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-left">PRODUCTS</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center">CATEGORY</th>
                 <th class="border border-black dark:border-gray-600 p-4 text-center">PRICE</th>
@@ -552,7 +555,7 @@ include '../includes/header.php';
                 ?>
                 <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer" onclick="window.location.href='<?php echo h(app_url('pages/product_batches.php?product_id=' . $productId)); ?>'">
                     <td class="border border-black dark:border-gray-600 p-4 text-center font-medium dark:text-gray-100">
-                        P<?php echo str_pad((string)$productId, 3, '0', STR_PAD_LEFT); ?>
+                        <?php echo h(format_product_code($product)); ?>
                     </td>
                     <td class="border border-black dark:border-gray-600 p-4 text-left">
                         <div class="font-medium text-black dark:text-gray-100"><?php echo h($product['product_name']); ?></div>
@@ -912,7 +915,7 @@ include '../includes/header.php';
         if (!product) return;
 
         var html = '<div class="space-y-3 text-sm">';
-        html += '<div><span class="font-bold">Product ID:</span> P' + String(product.id).padStart(3, '0') + '</div>';
+        html += '<div><span class="font-bold">Product Code:</span> ' + escapeHtml(product.code) + '</div>';
         html += '<div><span class="font-bold">Product Name:</span> ' + escapeHtml(product.name) + '</div>';
         html += '<div><span class="font-bold">Category:</span> ' + escapeHtml(product.category) + '</div>';
         html += '<div><span class="font-bold">Brand:</span> ' + escapeHtml(product.brand || 'N/A') + '</div>';
@@ -951,7 +954,7 @@ include '../includes/header.php';
         if (!product) return;
 
         var html = '<div class="space-y-3 text-sm mb-4">';
-        html += '<div><span class="font-bold">Product ID:</span> P' + String(product.id).padStart(3, '0') + '</div>';
+        html += '<div><span class="font-bold">Product Code:</span> ' + escapeHtml(product.code) + '</div>';
         html += '<div><span class="font-bold">Product Name:</span> ' + escapeHtml(product.name) + '</div>';
         html += '<div><span class="font-bold">Critical Stock:</span> ' + product.min_stock_level + ' pcs</div>';
         html += '<div><span class="font-bold">Total Stock:</span> ' + product.current_stock + ' pcs</div>';

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/domain.php';
 require_once __DIR__ . '/catalog_import.php';
+require_once __DIR__ . '/catalog_presentation.php';
 
 const INVENTORY_SCHEMA_VERSION = '2026_10_simple_catalog_receipts_v2';
 
@@ -90,7 +91,7 @@ function run_inventory_database_upgrades(PDO $pdo): bool
 function ensure_inventory_database_ready(PDO $pdo): void
 {
     try {
-        if (inventory_database_is_current($pdo) && final_catalog_is_current($pdo)) {
+        if (inventory_database_is_current($pdo) && final_catalog_is_current($pdo) && catalog_presentation_is_current($pdo)) {
             sync_session_catalog_version();
             return;
         }
@@ -102,8 +103,10 @@ function ensure_inventory_database_ready(PDO $pdo): void
         }
         $schemaUpdated = run_inventory_database_upgrades($pdo);
         $catalogUpdated = replace_final_catalog_once($pdo);
+        $presentationUpdated = correct_catalog_presentation_once($pdo);
         sync_session_catalog_version();
-        if ($catalogUpdated) set_flash('success', 'Product list updated: 220 products and 425 batches loaded. Previous products were removed from Inventory and POS. Sales history was preserved.');
+        if ($catalogUpdated) set_flash('success', 'Product list updated: 220 products and 425 batches loaded. Previous products, categories and sales were reset. User accounts were preserved.');
+        elseif ($presentationUpdated) set_flash('success', 'Product codes now start at P001. Inventory now opens in product-code order.');
         elseif ($schemaUpdated) set_flash('success', 'System updated successfully.');
     } catch (InventoryDatabaseUpgradeBusy) {
         inventory_upgrade_unavailable('The database update is already in progress. Reload shortly.');
@@ -117,6 +120,8 @@ function sync_session_catalog_version(): void
 {
     if (($_SESSION['inventory_catalog_version'] ?? '') !== INVENTORY_FINAL_CATALOG_VERSION) {
         unset($_SESSION['cart']);
+        // Forms from before the reset must not edit newly reused product IDs.
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         $_SESSION['inventory_catalog_version'] = INVENTORY_FINAL_CATALOG_VERSION;
     }
 }

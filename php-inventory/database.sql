@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS Category (
 CREATE TABLE IF NOT EXISTS Products (
     product_id INT AUTO_INCREMENT PRIMARY KEY,
     product_name VARCHAR(150) NOT NULL,
+    display_code INT UNSIGNED NULL UNIQUE,
     brand VARCHAR(100),
     description TEXT,
     price DECIMAL(10, 2) NOT NULL,

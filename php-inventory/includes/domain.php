@@ -4,6 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/app.php';
 require_once __DIR__ . '/recommendations.php';
 
+function format_product_code(array $product): string
+{
+    $number = $product['display_code'] ?? null;
+    return ($number === null ? 'OLD-P' : 'P') . str_pad((string) ($number ?? $product['product_id']), 3, '0', STR_PAD_LEFT);
+}
+
 function fetch_user_by_id(PDO $pdo, int $userId): ?array
 {
     $statement = $pdo->prepare('SELECT * FROM User WHERE user_id = :user_id LIMIT 1');

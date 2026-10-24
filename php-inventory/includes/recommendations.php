@@ -239,7 +239,7 @@ function find_pos_recommendation_sources(PDO $pdo, string $term, int $categoryId
             AND (expiration_date IS NULL OR expiration_date >= CURDATE()) GROUP BY product_id) stock ON stock.product_id = p.product_id
         WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
         AND (? = 0 OR p.category_id = ?)
-        AND ((? > 0 AND p.product_id = ?) OR (? = 0 AND LOWER(TRIM(p.product_name)) = ?))
+        AND ((? > 0 AND p.display_code = ?) OR (? = 0 AND LOWER(TRIM(p.product_name)) = ?))
         AND COALESCE(stock.sellable_stock, 0) <= 0
         ORDER BY p.product_id");
     $statement->execute([$categoryId, $categoryId, $codeId, $codeId, $codeId, strtolower(trim($term))]);

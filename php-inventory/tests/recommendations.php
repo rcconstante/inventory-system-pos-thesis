@@ -113,6 +113,7 @@ if ($dsn !== false && $dsn !== '') {
             $batch->execute([$fixture[0], 'TEST-' . $fixture[0], $quantity, $fixture[0] === 12 ? '2000-01-01' : null, $fixture[0] === 13 ? 'DISPOSED' : 'ACTIVE']);
         }
         // Simulate a populated legacy cache containing invalid pairs, before any rebuild.
+        $pdo->exec('UPDATE Products SET display_code = product_id');
         $pdo->exec('INSERT INTO Recommendation_State (state_id, algorithm_version) VALUES (1, 2)');
         $pdo->exec("INSERT INTO Feature_Based_Match (product_id, alternative_product_id, similarity_score, matched_attribute) SELECT 1, product_id, 0.90, 'compatibility' FROM Products WHERE product_id BETWEEN 2 AND 9 OR product_id IN (12, 13)");
         $legacy = fetch_recommendations_for_products($pdo, [1]);

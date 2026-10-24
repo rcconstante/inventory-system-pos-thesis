@@ -57,7 +57,7 @@ try {
     $pdo->exec('ALTER TABLE Products DROP COLUMN essential_fitment');
     $pdo->exec('DROP TABLE Product_Vehicle, Vehicle_Alias, Vehicle_Compatibility, Recommendation_State, Product_Type, Schema_Migration');
     $pdo->exec('CREATE TABLE Schema_Migration (migration_id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)');
-    $pdo->exec("INSERT INTO Schema_Migration (migration_id) VALUES ('2026_10_final_catalog_220_v1')");
+    $pdo->exec("INSERT INTO Schema_Migration (migration_id) VALUES ('2026_10_fresh_catalog_sales_v2')");
     preg_match('/host=([^;]+)/', $dsn, $host);
     preg_match('/port=(\d+)/', $dsn, $port);
     $env = array_merge(getenv(), [
@@ -111,7 +111,9 @@ try {
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility')->fetchColumn() === 1, 'Migration must consolidate formatting variants.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle')->fetchColumn() === 3, 'Migration must preserve all assignments across reruns.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Type')->fetchColumn() === 1 && $pdo->query('SELECT product_type FROM Products WHERE product_id = 2')->fetchColumn() === 'Tire', 'Migration must consolidate existing product types and preserve canonical values.');
-    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 2, 'Both catalog and schema completion markers must remain unique.');
+    verify_http((int) $pdo->query('SELECT COUNT(*) FROM Schema_Migration')->fetchColumn() === 3, 'Catalog, schema and product-code completion markers must remain unique.');
+    [$codeSearchStatus, $codeSearch] = http_request($base, 'pages/products.php?search=P001', $cookies);
+    verify_http($codeSearchStatus === 200 && str_contains($codeSearch, 'data-product-id="1"') && !str_contains($codeSearch, 'data-product-id="2"'), 'Inventory code search must return only the matching product without parameter errors.');
     verify_http(str_contains($inventory, 'data-catalog-picker="type"') && str_contains($inventory, 'Add New Product Type') && str_contains($inventory, 'data-picker-apply') && !str_contains($inventory, 'openDuplicateProductModal'), 'Inventory must expose single-type and multiple-vehicle dropdowns with inline creation and Apply.');
     $inlineToken = http_csrf($inventory);
     verify_http(!str_contains($inventory, 'Load Final Product List'), 'The automatic catalog update must not require a manual load button.');
@@ -230,6 +232,7 @@ try {
     http_request($base, 'pages/products.php', $cookies, $newProduct);
     $newProductId = (int) $pdo->query("SELECT product_id FROM Products WHERE product_name = 'New Front Tire'")->fetchColumn();
     verify_http($newProductId > 3 && $pdo->query('SELECT product_name FROM Products WHERE product_id = 1')->fetchColumn() === 'Dunlop Front Tire', 'Saving product details must create a separate product without changing the source.');
+    verify_http((int) $pdo->query('SELECT display_code FROM Products WHERE product_id = ' . $newProductId)->fetchColumn() === 4, 'Saving a new product must allocate the next stable display code.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Stock_Batch WHERE product_id = ' . $newProductId)->fetchColumn() === 0 && (int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $newProductId)->fetchColumn() === 0, 'Zero-stock product must not copy any batches or quantity.');
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Product_Vehicle WHERE product_id = ' . $newProductId)->fetchColumn() === 1, 'Compatibility selections must be saved on the new product.');
     verify_http(!str_contains($inventory, 'fitment[mounting]') && !str_contains($inventory, 'fitment[rating]') && !str_contains($inventory, 'Vehicle Compatibility') && !str_contains($inventory, 'openDuplicateProductModal'), 'Removed controls must not appear in Inventory.');
@@ -255,6 +258,8 @@ try {
     http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'add_to_cart' => '1', 'product_id' => '2', 'qty' => '1']);
     http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $checkoutToken, 'checkout' => '1', 'payment_method' => 'CASH', 'reference_number' => 'IGNORED']);
     verify_http($pdo->query('SELECT reference_number FROM Sale ORDER BY sale_id DESC LIMIT 1')->fetchColumn() === null, 'Cash payments must not retain GCash references.');
+    [$reportStatus, $report] = http_request($base, 'pages/records.php?tab=sold_items', $cookies);
+    verify_http($reportStatus === 200 && str_contains($report, 'P002'), 'Sales reports must use the same display codes as Inventory and POS.');
     [, $inventory] = http_request($base, 'pages/products.php', $cookies);
     http_request($base, 'pages/products.php', $cookies, ['csrf_token' => http_csrf($inventory), 'archive_product' => '1', 'product_id' => '2']);
     [$archiveStatus, $archivePage] = http_request($base, 'pages/product_archives.php', $cookies);
