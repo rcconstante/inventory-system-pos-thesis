@@ -35,6 +35,7 @@ $menuItems = match ($currentRoleId) {
 <div class="app-sidebar w-[220px] h-screen custom-dark-bg text-white flex flex-col p-4 flex-shrink-0 transition-colors duration-200 dark:bg-gray-950">
     <!-- Logo -->
     <div class="mb-8 flex flex-col items-center">
+        <?php if (business_setting('logo') !== ''): ?><img src="<?php echo h(business_setting('logo')); ?>" alt="Business logo" class="h-12 w-12 object-contain"><?php else: ?>
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path fill-rule="evenodd" clip-rule="evenodd" d="M0 24.5348C0 28.6303 3.32014 31.9505 7.41573 31.9505H32L0 1.79497V24.5348Z" fill="url(#logo_gradient_1)"/>
             <path opacity="0.983161" fill-rule="evenodd" clip-rule="evenodd" d="M0 7.40946C0 3.31387 3.32014 0 7.41573 0H32C32 0 3.73034 25.7671 1.2263 28.2342C0 29.9414 1.43276 31.8648 1.43276 31.8648C1.43276 31.8648 0 31.1225 0 29.5198C0 28.7041 0 15.8841 0 7.40946Z" fill="url(#logo_gradient_2)"/>
@@ -48,9 +49,9 @@ $menuItems = match ($currentRoleId) {
                     <stop offset="1" stop-color="#0065FF" />
                 </linearGradient>
             </defs>
-        </svg>
+        </svg><?php endif; ?>
         <div class="text-xs font-light mt-2 uppercase tracking-wider text-center">
-            Five Brothers<br>Trading
+            <?php echo h(business_setting('business_name')); ?>
         </div>
     </div>
 

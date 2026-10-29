@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/app.php';
+require_once __DIR__ . '/enhancements.php';
 require_once __DIR__ . '/recommendations.php';
 
 function format_product_code(array $product): string

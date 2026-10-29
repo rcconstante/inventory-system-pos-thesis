@@ -29,7 +29,7 @@ function resolve_product_type(PDO $pdo, string $name): string
 
 function essential_fitment_fields(): array
 {
-    return ['size' => 'Tire size', 'position' => 'Position', 'voltage' => 'Voltage', 'viscosity' => 'Oil viscosity'];
+    return ['size' => 'Tire size', 'position' => 'Position', 'voltage' => 'Voltage', 'viscosity' => 'Oil viscosity'] + ($GLOBALS['custom_product_properties'] ?? []);
 }
 
 function parse_essential_fitment(mixed $input): array

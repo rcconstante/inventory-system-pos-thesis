@@ -19,6 +19,13 @@ $tire = [
     'specification' => '80/90-14', 'description' => '', 'brand' => 'Example',
 ];
 check(is_eligible_product_alternative($tire, $tire), 'Matching tire should qualify.');
+$GLOBALS['custom_product_properties'] = ['material' => 'Material'];
+$customSource = array_replace($tire, ['essential_fitment' => '{"material":"ceramic"}']);
+check(!is_eligible_product_alternative($customSource, $tire), 'Missing custom required property must exclude a replacement.');
+check(is_eligible_product_alternative($customSource, array_replace($tire, ['essential_fitment' => '{"material":" CERAMIC "}'])), 'Custom required properties normalize and match.');
+check(!is_eligible_product_alternative($customSource, array_replace($tire, ['essential_fitment' => '{"material":"metal"}'])), 'Different custom required properties must exclude a replacement.');
+unset($GLOBALS['custom_product_properties']);
+
 $multiModelTire = array_replace($tire, ['compatibility' => 'Honda Click 125, Yamaha Mio']);
 check(is_eligible_product_alternative($multiModelTire, $tire, 'Honda Click 125'), 'One exact customer model is enough despite different full compatibility lists.');
 check(!is_eligible_product_alternative($multiModelTire, $tire, 'Yamaha Mio'), 'Alternative must support the actual customer model.');

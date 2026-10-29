@@ -27,6 +27,7 @@ $preferences = get_preferences();
                 </div>
             </div>
 
+            <?php if (current_role_id() === APP_ROLE_ADMIN): ?><a href="<?php echo h(app_url('pages/business_settings.php')); ?>" class="block mb-5 rounded border border-black dark:border-gray-500 px-4 py-3 text-sm">Business header, logo & product properties</a><?php endif; ?>
             <!-- Settings Options -->
             <div class="space-y-6 pl-10 mb-4">
                 <!-- Light Mode -->

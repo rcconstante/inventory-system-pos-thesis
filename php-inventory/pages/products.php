@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fitment = parse_essential_fitment($_POST['fitment'] ?? []);
             $essentialFitment = json_encode((object) $fitment, JSON_THROW_ON_ERROR);
             $compatibility = '';
-            $currentStock = max(0, (int) ($_POST['current_stock'] ?? 0));
+            $currentStock = 0;
             $minStockLevel = max(0, (int) ($_POST['min_stock_level'] ?? 0));
             $expiryDate = !empty($_POST['expiry_date']) ? $_POST['expiry_date'] : null;
 
@@ -197,33 +197,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'product_id' => $productId,
                     ]);
 
-                    // Adjust stock if quantity changed via edit
-                    $existingStock = (int) ($inventoryRow['current_stock'] ?? 0);
-                    if ($currentStock !== $existingStock) {
-                        $diff = $currentStock - $existingStock;
-                        if ($diff > 0) {
-                            create_stock_batch($pdo, $productId, $diff, $acquisitionCost, $manufacturingDate, $expiryDate);
-                        } else {
-                            $decreaseRemaining = abs($diff);
-                            $batchesForDecrease = $pdo->prepare(
-                                "SELECT batch_id, quantity_remaining FROM Stock_Batch
-                                 WHERE product_id = :pid AND is_depleted = 0 AND status = 'ACTIVE'
-                                 ORDER BY date_received DESC, batch_id DESC"
-                            );
-                            $batchesForDecrease->execute(['pid' => $productId]);
-                            foreach ($batchesForDecrease->fetchAll(PDO::FETCH_ASSOC) as $batch) {
-                                if ($decreaseRemaining <= 0) break;
-                                $batchQty = (int) $batch['quantity_remaining'];
-                                $take = min($decreaseRemaining, $batchQty);
-                                $newQty = $batchQty - $take;
-                                $pdo->prepare(
-                                    'UPDATE Stock_Batch SET quantity_remaining = :qty, is_depleted = CASE WHEN :qty2 <= 0 THEN 1 ELSE 0 END WHERE batch_id = :bid'
-                                )->execute(['qty' => $newQty, 'qty2' => $newQty, 'bid' => $batch['batch_id']]);
-                                $decreaseRemaining -= $take;
-                            }
-                            sync_inventory_from_batches($pdo, $productId);
-                        }
-                    }
                 } else {
                     $insertInventory = $pdo->prepare(
                         'INSERT INTO Inventory (product_id, current_stock, min_stock_level, expiry_date)
@@ -512,6 +485,7 @@ include '../includes/header.php';
 
     <?php if ($canManage): ?>
         <a href="<?php echo h(app_url('pages/product_archives.php')); ?>" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm dark:text-gray-100">Archived Products</a>
+        <a href="stock_in.php" class="rounded border border-black px-4 py-2 text-sm dark:border-gray-600">Stock-in</a>
         <button type="button" id="openProductOptions" aria-haspopup="dialog" aria-controls="productOptionsDialog" class="rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">Manage Product Options</button>
         <button type="button" onclick="openNewProductModal()" class="flex items-center gap-2 rounded-md border border-black dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
             <span>+ Add New Product</span>
@@ -877,14 +851,14 @@ include '../includes/header.php';
             option.disabled = option.dataset.active === '0' && !option.selected;
         });
         vehicles.dispatchEvent(new Event('catalog-selection-change'));
-        document.getElementById(prefix + 'current_stock').value = data.currentStock || '0';
+
         document.getElementById(prefix + 'manufacturing_date').value = data.manufacturingDate || '';
         document.getElementById(prefix + 'expiry_date').value = data.expiryDate || '';
     }
 
     function openNewProductModal() {
         document.querySelector('#addProductModal form').reset();
-        document.getElementById('current_stock').value = '0';
+
         document.getElementById('min_stock_level').value = '0';
         toggleProductModal('addProductModal', true);
     }
@@ -1001,7 +975,7 @@ include '../includes/header.php';
                     + ' data-qty="' + b.qty_remaining + '"'
                     + ' data-exp-date="' + (b.expiration_date || '') + '"'
                     + ' data-status="' + (b.status || 'ACTIVE') + '"'
-                    + '>'; 
+                    + '>';
                 html += '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>';
                 html += '</button>';
                 html += '<button type="button" title="Delete" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded" onclick="openDeleteBatchModal(' + b.batch_id + ', \'' + escapeAttr(b.batch_number) + '\')">';

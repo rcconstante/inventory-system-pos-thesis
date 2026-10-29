@@ -269,3 +269,16 @@ This reset intentionally deletes previous sales and their GCash references, rath
 Run `php tests/catalog_update.php` to verify replacement, transaction rollback/retry, concurrent access, account preservation, deletion of prior sales/categories and that later stock/product changes survive repeated opens.
 
 Inventory opens by stable product code: P001 through P220 for the source list, then P221 for the next added product. Product display codes are stored separately from database IDs, are unique, and are allocated inside the save transaction. Archiving/restoring does not renumber other products. Inventory search, POS search, cart/checkout and reports use the same displayed code. No business data is reset when an already-completed product-code correction is checked.
+
+
+### October 29 revisions
+
+- **Inventory / Stock-in:** Product forms no longer set quantities. New products start with zero stock; product edits preserve stock. Use Inventory → Stock-in to receive a validated batch into an active product. Existing batch management remains available.
+- **Batch audit dates:** Product creation / edit timestamps and batch received / updated timestamps appear in Batch Management. Historical product creation dates that were never recorded display “Not recorded”.
+- **Returns:** Admins and cashiers can select whole sale-item lines and choose original sellable batches or Do not restock. Cashiers retain sale ownership restrictions. Reasons, time and destination are saved per line. Repeated returns are rejected. Partial-return sales remain completed for the remaining lines; dashboard revenue subtracts returned line amounts and reports exclude returned items from sold/top-selling totals. The final returned line marks the sale RETURNED. Expired, disposed or archived-product batches cannot be restocked through returns. Legacy returns without stored reasons show “Reason not recorded”.
+- **Reports:** Shorter print/export header. Inventory list supports printing / Save as PDF via the print dialog and CSV download with spreadsheet formula protection.
+- **Business settings:** Settings gear → Business header, logo & product properties (admin only). Name, address, phone and validated PNG/JPEG logo apply to navigation and receipts; reports use the configured branding. Logo uploads stay in the database as image data, without executable filesystem uploads. Custom property keys are stable; an existing key can have its label renamed. Per-product nonblank custom values participate in essential alternative matching. Built-in fitment rules remain protected.
+- **Receipts:** Stable `SI-` invoice identifiers derived from the sale ID appear on POS and dashboard receipts.
+- **Upgrade:** New tables and columns are installed once automatically under a database lock. This revision does not change the existing catalog-reset version or reset products, stock, sales or accounts.
+
+Annotated screenshots and the walkthrough are in `../artifacts/revision-guide/index.html`. They use disposable test records, not live customer transactions.

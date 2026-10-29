@@ -25,14 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_sale'])) {
         if ($saleStatus === false) { throw new RuntimeException("Sale not found."); }
         if (strtoupper($saleStatus) !== 'COMPLETED') { throw new RuntimeException("Only completed transactions can be returned."); }
 
-        $updateSale = $pdo->prepare("UPDATE Sale SET status = 'RETURNED' WHERE sale_id = ?");
-        $updateSale->execute([$saleId]);
-
-        $itemsStmt = $pdo->prepare("SELECT sale_item_id, product_id, quantity FROM Sale_Item WHERE sale_id = ?");
-        $itemsStmt->execute([$saleId]);
-        foreach ($itemsStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-            restore_stock_to_batches($pdo, (int)$item['sale_item_id']);
-        }
+        return_selected_sale_items($pdo, $saleId, $reason, (array) ($_POST['return_items'] ?? []), (string) ($_POST['return_destination'] ?? ''));
         sync_reorder_alerts_for_catalog($pdo);
         $pdo->commit();
         set_flash('success', 'Transaction #' . $saleId . ' successfully returned.');
@@ -57,7 +50,7 @@ $summaryPeriodLabel = $dateFrom === $dateTo
     : date('F d, Y', strtotime($dateFrom)) . ' to ' . date('F d, Y', strtotime($dateTo));
 
 $summaryStatement = $pdo->prepare(
-    "SELECT COALESCE(SUM(total_amount), 0) AS period_sales
+    "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(r.subtotal) FROM Sale_Item r WHERE r.sale_id = Sale.sale_id AND r.returned_at IS NOT NULL), 0)), 0) AS period_sales
      FROM Sale
      WHERE status = 'COMPLETED'
        AND DATE(`date`) BETWEEN :from AND :to"
@@ -80,7 +73,7 @@ $fastMovingStatement = $pdo->query(
      FROM Sale_Item si
      JOIN Products p ON si.product_id = p.product_id
      JOIN Sale s ON si.sale_id = s.sale_id
-     WHERE s.status = 'COMPLETED'
+     WHERE s.status = 'COMPLETED' AND si.returned_at IS NULL
      GROUP BY p.product_id
      ORDER BY total_sold DESC
      LIMIT 4"
@@ -89,7 +82,7 @@ $fastMovingProducts = $fastMovingStatement->fetchAll(PDO::FETCH_ASSOC);
 
 // Slow Moving Products (exclude products already in the fast-moving top 4)
 $slowMovingStatement = $pdo->query(
-    "SELECT p.product_name, COALESCE(SUM(si.quantity), 0) as total_sold
+    "SELECT p.product_name, COALESCE(SUM(CASE WHEN s.status = 'COMPLETED' AND si.returned_at IS NULL THEN si.quantity ELSE 0 END), 0) as total_sold
      FROM Products p
      LEFT JOIN Sale_Item si ON p.product_id = si.product_id
      LEFT JOIN Sale s ON si.sale_id = s.sale_id AND s.status = 'COMPLETED'
@@ -99,7 +92,7 @@ $slowMovingStatement = $pdo->query(
              FROM Sale_Item si2
              JOIN Products p2 ON si2.product_id = p2.product_id
              JOIN Sale s2 ON si2.sale_id = s2.sale_id
-             WHERE s2.status = 'COMPLETED'
+             WHERE s2.status = 'COMPLETED' AND si2.returned_at IS NULL
              GROUP BY p2.product_id
              ORDER BY SUM(si2.quantity) DESC
              LIMIT 4
@@ -148,7 +141,7 @@ $transactionItems = [];
 if (!empty($transactions)) {
     $saleIds = array_column($transactions, 'sale_id');
     $placeholders = implode(',', array_fill(0, count($saleIds), '?'));
-    $itemsStmt = $pdo->prepare("SELECT si.sale_id, si.quantity, si.selling_price, si.subtotal, p.product_name FROM Sale_Item si JOIN Products p ON si.product_id = p.product_id WHERE si.sale_id IN ($placeholders)");
+    $itemsStmt = $pdo->prepare("SELECT si.sale_item_id, si.returned_at, si.sale_id, si.quantity, si.selling_price, si.subtotal, p.product_name FROM Sale_Item si JOIN Products p ON si.product_id = p.product_id WHERE si.sale_id IN ($placeholders)");
     $itemsStmt->execute($saleIds);
     foreach ($itemsStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
         $transactionItems[$item['sale_id']][] = $item;
@@ -302,10 +295,12 @@ include '../includes/header.php';
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
         <div class="p-8 text-center border-b border-black dark:border-gray-600">
-            <h2 class="text-xl font-medium tracking-widest uppercase mb-2">FIVE BROTHERS TRADING</h2>
-            <p class="text-sm mb-1 text-gray-800 dark:text-gray-300">0961-195-6139</p>
-            <p class="text-sm mb-1 text-gray-800 dark:text-gray-300">Mabuhay Carmona, Cavite</p>
+            <?php if (business_setting('logo')): ?><img src="<?php echo h(business_setting('logo')); ?>" alt="Business logo" class="mx-auto mb-2 h-12 w-12 object-contain"><?php endif; ?>
+            <h2 class="text-xl font-medium tracking-widest uppercase mb-2"><?php echo h(business_setting('business_name')); ?></h2>
+            <p class="text-sm mb-1 text-gray-800 dark:text-gray-300"><?php echo h(business_setting('phone')); ?></p>
+            <p class="text-sm mb-1 text-gray-800 dark:text-gray-300"><?php echo h(business_setting('address')); ?></p>
             <p class="text-sm mb-1 text-gray-800 dark:text-gray-300">Opening Hours: 9:00 AM - 3:00 PM</p>
+            <p id="rm-invoice" class="text-sm font-medium"></p>
             <p class="text-sm mt-3 font-medium" id="rm-date">Date: </p>
         </div>
         <div class="p-8 flex-1 overflow-auto max-h-[40vh]">
@@ -338,13 +333,15 @@ include '../includes/header.php';
 
 <!-- Return Modal -->
 <div id="returnModal" class="hidden fixed inset-0 z-[120] items-center justify-center bg-black/60 p-4 backdrop-blur-md">
-    <div class="w-[450px] bg-white dark:bg-gray-800 text-black dark:text-white border border-black dark:border-gray-600 shadow-2xl p-8">
+    <div class="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-800 text-black dark:text-white border border-black dark:border-gray-600 shadow-2xl p-8">
         <h3 class="text-lg font-bold uppercase mb-6 tracking-wide border-b border-black dark:border-gray-600 pb-4">Process Return</h3>
         <p class="mb-4 text-sm font-medium">Transaction: <span id="ret-sale-id-display" class="font-bold"></span></p>
         <form method="POST" action="">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="return_sale" value="1">
             <input type="hidden" name="sale_id" id="ret-sale-id" value="">
+            <fieldset class="mb-4"><legend class="text-sm font-bold mb-2">Products to return (whole line quantities)</legend><div id="return-items" class="max-h-40 overflow-auto"></div></fieldset>
+            <label class="block mb-4 text-sm">Return destination<select name="return_destination" required class="mt-1 w-full border border-black p-2 dark:bg-gray-800"><option value="">Choose destination</option><option value="STOCK">Original stock batches — sellable items only</option><option value="QUARANTINE">Do not restock — damaged / expired items</option></select></label>
             <div class="mb-8">
                 <label class="block text-sm font-bold mb-2 uppercase tracking-wide">Reason for Return</label>
                 <select name="return_reason" required class="w-full border border-black dark:border-gray-500 bg-transparent px-4 py-3 focus:outline-none dark:text-gray-100">
@@ -366,8 +363,11 @@ include '../includes/header.php';
 
 <script>
     let currentSaleId = null;
+    let currentReturnItems = [];
     function openReceiptModal(saleData) {
         currentSaleId = saleData.id;
+        currentReturnItems = saleData.items;
+        document.getElementById("rm-invoice").textContent = "Sales Invoice: SI-" + String(saleData.id).padStart(8, "0");
         document.getElementById('rm-date').textContent = 'Date: ' + saleData.date;
         document.getElementById('rm-total').textContent = parseFloat(saleData.total).toFixed(2);
         document.getElementById('rm-method').textContent = saleData.method;
@@ -396,6 +396,13 @@ include '../includes/header.php';
     }
     function openReturnModal() {
         closeReceiptModal();
+        const list = document.getElementById('return-items');
+        list.replaceChildren();
+        currentReturnItems.filter(item => !item.returned_at).forEach(item => {
+            const label = document.createElement('label'); label.className = 'block py-2 text-sm';
+            const input = document.createElement('input'); input.type = 'checkbox'; input.name = 'return_items[]'; input.value = item.sale_item_id;
+            label.append(input, document.createTextNode(' ' + item.product_name + ' × ' + item.quantity)); list.append(label);
+        });
         document.getElementById('ret-sale-id').value = currentSaleId;
         document.getElementById('ret-sale-id-display').textContent = '#' + currentSaleId;
         document.getElementById('returnModal').classList.remove('hidden');

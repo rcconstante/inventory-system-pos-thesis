@@ -53,7 +53,7 @@ if ($activeTab === 'top_selling') {
          INNER JOIN Sale s ON s.sale_id = si.sale_id
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
-         WHERE s.status = 'COMPLETED' AND " . implode(' AND ', $salesFilters) . "
+         WHERE s.status = 'COMPLETED' AND si.returned_at IS NULL AND " . implode(' AND ', $salesFilters) . "
          GROUP BY p.product_id, p.display_code, c.category_name, p.product_name, p.brand
          ORDER BY total_quantity DESC, total_amount DESC, p.product_name ASC"
     );
@@ -63,6 +63,7 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
             s.sale_id,
+            si.return_reason,
             p.product_id,
             p.display_code,
             c.category_name,
@@ -74,7 +75,7 @@ if ($activeTab === 'top_selling') {
          INNER JOIN Sale s ON s.sale_id = si.sale_id
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
-         WHERE s.status = 'COMPLETED' AND " . implode(' AND ', $salesFilters) . "
+         WHERE s.status = 'COMPLETED' AND si.returned_at IS NULL AND " . implode(' AND ', $salesFilters) . "
          ORDER BY s.`date` DESC, s.sale_id DESC"
     );
     $statement->execute($queryParameters);
@@ -83,6 +84,7 @@ if ($activeTab === 'top_selling') {
     $statement = $pdo->prepare(
         "SELECT
             s.sale_id,
+            si.return_reason,
             p.product_id,
             p.display_code,
             c.category_name,
@@ -93,7 +95,7 @@ if ($activeTab === 'top_selling') {
          INNER JOIN Sale s ON s.sale_id = si.sale_id
          INNER JOIN Products p ON p.product_id = si.product_id
          LEFT JOIN Category c ON c.category_id = p.category_id
-         WHERE s.status = 'RETURNED' AND " . implode(' AND ', $salesFilters) . "
+         WHERE (si.returned_at IS NOT NULL OR s.status = 'RETURNED') AND " . implode(' AND ', $salesFilters) . "
          ORDER BY s.`date` DESC, s.sale_id DESC"
     );
     $statement->execute($queryParameters);
@@ -122,8 +124,8 @@ if ($activeTab === 'top_selling') {
 
 $currentUser = current_user_session();
 $exportedBy = $currentUser['full_name'] !== '' ? $currentUser['full_name'] : 'System User';
-$businessName = 'FIVE BROTHERS TRADING';
-$businessAddress = 'Mabuhay, Carmona, Cavite';
+$businessName = business_setting('business_name');
+$businessAddress = business_setting('address');
 $exportedAt = date('F d, Y h:i A');
 $exportPeriodLabel = in_array($activeTab, ['top_selling', 'sold_items', 'cancelled_orders'], true)
     ? ($dateFrom === $dateTo ? date('F d, Y', strtotime($dateFrom)) : date('F d, Y', strtotime($dateFrom)) . ' to ' . date('F d, Y', strtotime($dateTo)))
@@ -138,6 +140,7 @@ $page_title = 'REPORTS';
 include '../includes/header.php';
 ?>
 
+<a href="inventory_export.php" class="mb-4 inline-block rounded border border-black px-4 py-2 text-sm dark:border-gray-600">Inventory list · Print / Download</a>
 <div class="mb-6 flex flex-wrap gap-8 border-b border-black dark:border-gray-600 pb-4">
     <?php foreach ($tabs as $tabKey => $label): ?>
         <a href="?tab=<?php echo h($tabKey); ?>&from=<?php echo h($dateFrom); ?>&to=<?php echo h($dateTo); ?>" class="pb-2 text-sm font-medium <?php echo $activeTab === $tabKey ? 'border-b-2 border-black dark:border-gray-100 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200'; ?>">
@@ -222,7 +225,7 @@ include '../includes/header.php';
                     <div><?php echo h($record['product_name']); ?></div>
                     <div><?php echo h($record['brand'] !== '' ? $record['brand'] : 'N/A'); ?></div>
                     <div><?php echo h((string) ($record['quantity'] ?? 0)); ?></div>
-                    <div>Returned</div>
+                    <div><?php echo h($record['return_reason'] ?: 'Reason not recorded'); ?></div>
                 </div>
             <?php else: ?>
                 <div class="grid grid-cols-7 items-center gap-4 border-b border-black dark:border-gray-600 p-4 text-sm last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-100">
@@ -377,6 +380,7 @@ include '../includes/header.php';
 
         <div class="report-export-brand">
             <div class="report-export-logo" aria-hidden="true">
+                <?php if (business_setting('logo')): ?><img src="<?php echo h(business_setting('logo')); ?>" alt="Business logo" style="width:34px;height:34px;object-fit:contain"><?php else: ?>
                 <svg width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path fill-rule="evenodd" clip-rule="evenodd" d="M0 24.5348C0 28.6303 3.32014 31.9505 7.41573 31.9505H32L0 1.79497V24.5348Z" fill="url(#report_logo_gradient_1)"/>
                     <path opacity="0.983161" fill-rule="evenodd" clip-rule="evenodd" d="M0 7.40946C0 3.31387 3.32014 0 7.41573 0H32C32 0 3.73034 25.7671 1.2263 28.2342C0 29.9414 1.43276 31.8648 1.43276 31.8648C1.43276 31.8648 0 31.1225 0 29.5198C0 28.7041 0 15.8841 0 7.40946Z" fill="url(#report_logo_gradient_2)"/>
@@ -390,7 +394,7 @@ include '../includes/header.php';
                             <stop offset="1" stop-color="#8E9CFF" stop-opacity="0" />
                         </linearGradient>
                     </defs>
-                </svg>
+                </svg><?php endif; ?>
             </div>
             <div>
                 <p class="report-export-business-name"><?php echo h($businessName); ?></p>
@@ -401,36 +405,7 @@ include '../includes/header.php';
         <div class="report-export-titlebar"><?php echo h($reportTitle); ?></div>
         <div class="report-export-subtitle"><?php echo h($reportSubtitle); ?></div>
 
-        <table class="report-export-meta">
-            <tr>
-                <td>
-                    <span class="report-export-meta-label">Printed / Exported By</span>
-                    <?php echo h($exportedBy); ?>
-                </td>
-                <td>
-                    <span class="report-export-meta-label">Business Name</span>
-                    <?php echo h($businessName); ?>
-                </td>
-                <td>
-                    <span class="report-export-meta-label">Date</span>
-                    <?php echo h($exportedAt); ?>
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    <span class="report-export-meta-label">Module</span>
-                    <?php echo h($tabs[$activeTab]); ?>
-                </td>
-                <td>
-                    <span class="report-export-meta-label">Covered Period</span>
-                    <?php echo h($exportPeriodLabel); ?>
-                </td>
-                <td>
-                    <span class="report-export-meta-label">Address</span>
-                    <?php echo h($businessAddress); ?>
-                </td>
-            </tr>
-        </table>
+        <p style="font-size:10px;margin:8px 0">Prepared by <?php echo h($exportedBy); ?> · <?php echo h($exportedAt); ?></p>
 
         <table class="report-export-table">
             <thead>
@@ -484,7 +459,7 @@ include '../includes/header.php';
                                 <td class="numeric"><?php echo h((string) $record['min_stock_level']); ?></td>
                             <?php elseif ($activeTab === 'cancelled_orders'): ?>
                                 <td class="numeric"><?php echo h((string) ($record['quantity'] ?? 0)); ?></td>
-                                <td>Returned</td>
+                                <td><?php echo h($record['return_reason'] ?: 'Reason not recorded'); ?></td>
                             <?php else: ?>
                                 <td class="numeric"><?php echo h((string) ($record['quantity'] ?? $record['total_quantity'] ?? 0)); ?></td>
                                 <td class="numeric"><?php echo h(money_format_php((float) ($record['subtotal'] ?? $record['total_amount'] ?? 0))); ?></td>

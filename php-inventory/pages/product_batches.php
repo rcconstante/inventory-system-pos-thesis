@@ -21,6 +21,8 @@ $productStatement = $pdo->prepare(
     "SELECT
         p.product_id,
         p.product_name,
+        p.created_at,
+        p.updated_at,
         COALESCE(p.brand, '') AS brand,
         COALESCE(c.category_name, 'Uncategorized') AS category_name,
         COALESCE(i.current_stock, 0) AS current_stock,
@@ -42,6 +44,9 @@ if (!$product) {
 }
 
 $batches = fetch_batches_for_product($pdo, $productId);
+$batchDates = $pdo->prepare('SELECT batch_id, date_received, updated_at FROM Stock_Batch WHERE product_id = ?');
+$batchDates->execute([$productId]);
+$batchAudit = []; foreach ($batchDates->fetchAll() as $audit) $batchAudit[$audit['batch_id']] = $audit;
 
 $page_title = 'BATCH MANAGEMENT';
 include '../includes/header.php';
@@ -57,6 +62,7 @@ include '../includes/header.php';
     <?php endif; ?>
 </div>
 
+<p class="mb-4 text-sm">Product added: <?php echo h($product['created_at'] ?? 'Not recorded'); ?> · Last edited: <?php echo h($product['updated_at'] ?? 'Not edited'); ?></p>
 <div class="mb-6 grid gap-4 md:grid-cols-4">
     <div class="rounded border border-black dark:border-gray-600 bg-white dark:bg-gray-800 p-5">
         <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Product</p>
@@ -90,7 +96,7 @@ include '../includes/header.php';
             <table class="w-full border-collapse text-sm">
                 <thead>
                     <tr class="bg-gray-50 dark:bg-gray-900/40 text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-                        <th class="border-b border-black dark:border-gray-600 p-4 text-left">Batch No</th>
+                        <th class="border-b border-black dark:border-gray-600 p-4 text-left">Batch / Audit dates</th>
                         <th class="border-b border-black dark:border-gray-600 p-4 text-center">Qty Received</th>
                         <th class="border-b border-black dark:border-gray-600 p-4 text-center">Qty Remaining</th>
                         <th class="border-b border-black dark:border-gray-600 p-4 text-center">Cost</th>
@@ -109,7 +115,7 @@ include '../includes/header.php';
                         $statusClass = $batchStatus === 'ACTIVE' ? 'text-green-600' : ($batchStatus === 'EXPIRED' ? 'text-red-600' : 'text-gray-500');
                         ?>
                         <tr class="border-b border-black dark:border-gray-600 last:border-b-0 dark:text-gray-100">
-                            <td class="p-4 font-medium"><?php echo h($batch['batch_number']); ?></td>
+                            <td class="p-4 font-medium"><?php echo h($batch['batch_number']); ?><small class="block text-xs text-gray-500">Added: <?php echo h($batchAudit[$batch['batch_id']]['date_received'] ?? 'Not recorded'); ?><br>Edited: <?php echo h($batchAudit[$batch['batch_id']]['updated_at'] ?? 'Not edited'); ?></small></td>
                             <td class="p-4 text-center"><?php echo h((string) $batch['quantity_received']); ?></td>
                             <td class="p-4 text-center"><?php echo h((string) $batch['quantity_remaining']); ?></td>
                             <td class="p-4 text-center"><?php echo h($batch['acquisition_cost'] !== null ? money_format_php((float) $batch['acquisition_cost']) : 'N/A'); ?></td>

@@ -855,10 +855,12 @@ include '../includes/header.php';
         </a>
         
         <div class="p-8 text-center border-b border-black dark:border-gray-600">
-            <h2 class="text-xl font-medium tracking-widest uppercase mb-2">FIVE BROTHERS TRADING</h2>
-            <p class="text-sm mb-1">0961-195-6139</p>
-            <p class="text-sm mb-1">Mabuhay Carmona, Cavite</p>
+            <?php if (business_setting('logo')): ?><img src="<?php echo h(business_setting('logo')); ?>" alt="Business logo" class="mx-auto mb-2 h-12 w-12 object-contain"><?php endif; ?>
+            <h2 class="text-xl font-medium tracking-widest uppercase mb-2"><?php echo h(business_setting('business_name')); ?></h2>
+            <p class="text-sm mb-1"><?php echo h(business_setting('phone')); ?></p>
+            <p class="text-sm mb-1"><?php echo h(business_setting('address')); ?></p>
             <p class="text-sm mb-1">Opening Hours: 9:00 AM - 3:00 PM</p>
+            <p class="text-sm">Sales Invoice: <?php echo h(sales_invoice_number((int) $receiptSale['sale_id'])); ?></p>
             <p class="text-sm mt-3">Transaction No. <?php echo h((string)$receiptSale['sale_id']); ?></p>
             <p class="text-sm">Date: <?php echo date('F d, Y', strtotime($receiptSale['date'] ?? 'now')); ?></p>
         </div>

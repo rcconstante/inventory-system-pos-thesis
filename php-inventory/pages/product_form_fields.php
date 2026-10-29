@@ -70,10 +70,6 @@ $formPrefix = $formPrefix ?? '';
         <label class="mb-1 block text-sm font-medium dark:text-gray-200">Selling Price (&#8369;)</label>
         <input type="number" step="0.01" min="0" id="<?php echo h($formPrefix . 'price'); ?>" name="price" required class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
     </div>
-    <div>
-        <label class="mb-1 block text-sm font-medium dark:text-gray-200">Quantity</label>
-        <input type="number" min="0" id="<?php echo h($formPrefix . 'current_stock'); ?>" name="current_stock" required class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-    </div>
     <div class="md:col-span-2">
         <label class="mb-1 block text-sm font-medium dark:text-gray-200">Description</label>
         <textarea id="<?php echo h($formPrefix . 'description'); ?>" name="description" rows="2" class="w-full rounded border px-3 py-2 focus:outline-none focus:ring focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"></textarea>

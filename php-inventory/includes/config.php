@@ -28,4 +28,10 @@ if (PHP_SAPI !== 'cli' && function_exists('is_logged_in') && is_logged_in()
     && basename($_SERVER['SCRIPT_FILENAME'] ?? '') !== 'login.php') {
     require_once __DIR__ . '/database_upgrades.php';
     ensure_inventory_database_ready($pdo);
+    try {
+        ensure_revision_schema($pdo);
+    } catch (Throwable $exception) {
+        error_log('Inventory revision update failed: ' . $exception->getMessage());
+        inventory_upgrade_unavailable('The system update could not finish. Reload to retry, or ask your administrator to check database permissions.');
+    }
 }
