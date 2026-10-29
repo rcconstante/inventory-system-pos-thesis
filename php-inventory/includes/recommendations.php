@@ -56,7 +56,7 @@ function product_specification_display(array $product): string
     foreach ($values as $key => $value) {
         if (isset(essential_fitment_fields()[$key]) && is_string($value)) $lines[] = essential_fitment_fields()[$key] . ': ' . $value;
     }
-    return trim((string) ($product['specification'] ?? '') . ($lines !== [] ? "\n\nEssential fitment:\n" . implode("\n", $lines) : ''));
+    return trim((string) ($product['specification'] ?? '') . ($lines !== [] ? "\n\nProperties:\n" . implode("\n", $lines) : ''));
 }
 
 function tire_size_key(string $text): ?string
@@ -82,7 +82,7 @@ function essential_fitment_for_product(array $product): ?array
         return null;
     }
     if (!is_array($fitment)) return null;
-    $fitment = array_intersect_key($fitment, essential_fitment_fields());
+    $fitment = array_intersect_key($fitment, ['size' => true, 'position' => true, 'voltage' => true, 'viscosity' => true] + ($GLOBALS['matching_product_properties'] ?? []));
     foreach ($fitment as $key => $value) {
         if (!is_string($value)) return null;
         if (trim($value) === '') { unset($fitment[$key]); continue; }

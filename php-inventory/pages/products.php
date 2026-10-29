@@ -74,6 +74,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->beginTransaction();
             $productType = resolve_product_type($pdo, $productType);
+            if ($productId !== null) {
+                $savedProperties = $pdo->prepare('SELECT essential_fitment FROM Products WHERE product_id = ? FOR UPDATE');
+                $savedProperties->execute([$productId]);
+                try {
+                    $savedValues = json_decode($savedProperties->fetchColumn() ?: '{}', true, 32, JSON_THROW_ON_ERROR);
+                } catch (JsonException) {
+                    throw new RuntimeException('Saved product properties are invalid. The product was not changed.');
+                }
+                if (!is_array($savedValues)) throw new RuntimeException('Saved product properties are invalid. The product was not changed.');
+                $fitment += array_intersect_key($savedValues, $GLOBALS['retired_product_properties'] ?? []);
+                $essentialFitment = json_encode((object) $fitment, JSON_THROW_ON_ERROR);
+            }
 
             if ($productId === null) {
                 $insertProduct = $pdo->prepare(

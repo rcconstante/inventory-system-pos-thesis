@@ -29,7 +29,7 @@ $formPrefix = $formPrefix ?? '';
     <div class="md:col-span-2">
         <fieldset class="rounded border p-3 dark:border-gray-600">
             <legend class="px-1 text-sm font-medium">Specifications</legend>
-            <p class="mb-3 text-xs text-gray-500">Fill in the details a replacement must match. Leave other fields blank.</p>
+            <p class="mb-3 text-xs text-gray-500">Built-in fitment and enabled matching criteria constrain alternatives. Other properties store information only; leave unused fields blank.</p>
             <div class="grid gap-3 md:grid-cols-2">
             <?php foreach (essential_fitment_fields() as $key => $label): ?>
                 <label for="<?php echo h($formPrefix . 'fitment_' . $key); ?>" class="text-sm"><?php echo h($label); ?>

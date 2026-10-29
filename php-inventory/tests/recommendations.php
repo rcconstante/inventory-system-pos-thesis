@@ -20,10 +20,13 @@ $tire = [
 ];
 check(is_eligible_product_alternative($tire, $tire), 'Matching tire should qualify.');
 $GLOBALS['custom_product_properties'] = ['material' => 'Material'];
+$GLOBALS['matching_product_properties'] = ['material' => 'Material'];
 $customSource = array_replace($tire, ['essential_fitment' => '{"material":"ceramic"}']);
 check(!is_eligible_product_alternative($customSource, $tire), 'Missing custom required property must exclude a replacement.');
 check(is_eligible_product_alternative($customSource, array_replace($tire, ['essential_fitment' => '{"material":" CERAMIC "}'])), 'Custom required properties normalize and match.');
 check(!is_eligible_product_alternative($customSource, array_replace($tire, ['essential_fitment' => '{"material":"metal"}'])), 'Different custom required properties must exclude a replacement.');
+unset($GLOBALS['matching_product_properties']);
+check(is_eligible_product_alternative($customSource, $tire), 'Information-only properties must not exclude valid alternatives.');
 unset($GLOBALS['custom_product_properties']);
 
 $multiModelTire = array_replace($tire, ['compatibility' => 'Honda Click 125, Yamaha Mio']);

@@ -34,8 +34,9 @@ function ensure_revision_schema(PDO $pdo): void
             $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lockName]);
         }
     }
+    ensure_property_management_schema($pdo);
     $GLOBALS['business_settings'] = $pdo->query('SELECT * FROM Business_Settings WHERE setting_id = 1')->fetch(PDO::FETCH_ASSOC) ?: [];
-    $GLOBALS['custom_product_properties'] = $pdo->query('SELECT property_key, label FROM Product_Property ORDER BY label')->fetchAll(PDO::FETCH_KEY_PAIR);
+    load_product_property_settings($pdo);
 }
 
 function business_setting(string $key): string
@@ -76,4 +77,87 @@ function return_selected_sale_items(PDO $pdo, int $saleId, string $reason, array
     $remaining = $pdo->prepare('SELECT COUNT(*) FROM Sale_Item WHERE sale_id = ? AND returned_at IS NULL');
     $remaining->execute([$saleId]);
     if ((int) $remaining->fetchColumn() === 0) $pdo->prepare("UPDATE Sale SET status = 'RETURNED' WHERE sale_id = ?")->execute([$saleId]);
+}
+
+function ensure_property_management_schema(PDO $pdo): void
+{
+    $marker = '2026_10_product_properties_v2';
+    $check = $pdo->prepare('SELECT 1 FROM Schema_Migration WHERE migration_id = ?');
+    $check->execute([$marker]);
+    if ($check->fetchColumn()) return;
+    $name = inventory_upgrade_lock_name($pdo);
+    $lock = $pdo->prepare('SELECT GET_LOCK(?, 5)'); $lock->execute([$name]);
+    if ((int) $lock->fetchColumn() !== 1) throw new RuntimeException('Property update is busy. Reload shortly.');
+    try {
+        $check->execute([$marker]);
+        if ($check->fetchColumn()) return;
+        if (!table_column_exists($pdo, 'Product_Property', 'is_active')) $pdo->exec('ALTER TABLE Product_Property ADD COLUMN is_active TINYINT NOT NULL DEFAULT 1');
+        // Existing criteria keep their previous behavior. New properties default to information only.
+        if (!table_column_exists($pdo, 'Product_Property', 'affects_matching')) {
+            $pdo->exec('ALTER TABLE Product_Property ADD COLUMN affects_matching TINYINT NOT NULL DEFAULT 1');
+        }
+        $pdo->exec('ALTER TABLE Product_Property MODIFY COLUMN affects_matching TINYINT NOT NULL DEFAULT 0');
+        $pdo->prepare('INSERT INTO Schema_Migration (migration_id) VALUES (?)')->execute([$marker]);
+    } finally { $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]); }
+}
+
+function load_product_property_settings(PDO $pdo): void
+{
+    $all = $pdo->query('SELECT property_key, label, is_active, affects_matching FROM Product_Property ORDER BY label, property_key')->fetchAll(PDO::FETCH_ASSOC);
+    $GLOBALS['product_property_settings'] = $all;
+    $GLOBALS['custom_product_properties'] = [];
+    $GLOBALS['matching_product_properties'] = [];
+    $GLOBALS['retired_product_properties'] = [];
+    foreach ($all as $property) {
+        $key = $property['property_key'];
+        if (!(int) $property['is_active']) { $GLOBALS['retired_product_properties'][$key] = $property['label']; continue; }
+        $GLOBALS['custom_product_properties'][$key] = $property['label'];
+        if ((int) $property['affects_matching']) $GLOBALS['matching_product_properties'][$key] = $property['label'];
+    }
+}
+
+function save_product_property(PDO $pdo, array $input): void
+{
+    $key = $input['property_key'] ?? '';
+    $label = $input['label'] ?? '';
+    $original = $input['original_key'] ?? '';
+    if (!is_string($key) || !preg_match('/^[a-z][a-z0-9_]{0,39}$/D', $key)
+        || !is_string($label) || trim($label) === '' || strlen($label) > 80 || !is_string($original)) {
+        throw new RuntimeException('Use a label up to 80 characters and a key with lowercase letters, numbers or underscores.');
+    }
+    $builtIn = ['size', 'position', 'voltage', 'viscosity'];
+    if (in_array($key, $builtIn, true) || in_array($original, $builtIn, true)) throw new RuntimeException('Built-in fitment keys are reserved.');
+    $pdo->beginTransaction();
+    try {
+        $rows = $pdo->query('SELECT * FROM Product_Property ORDER BY property_key FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC);
+        $existing = array_column($rows, null, 'property_key');
+        if ($original !== '' && !isset($existing[$original])) throw new RuntimeException('This property changed. Reload settings before editing.');
+        if ($key !== $original && isset($existing[$key])) throw new RuntimeException('That property key is already in use, including retired properties.');
+        if ($original !== '' && $key !== $original) {
+            $products = $pdo->query('SELECT product_id, essential_fitment FROM Products ORDER BY product_id FOR UPDATE')->fetchAll(PDO::FETCH_ASSOC);
+            $update = $pdo->prepare('UPDATE Products SET essential_fitment = ? WHERE product_id = ?');
+            foreach ($products as $product) {
+                $values = json_decode($product['essential_fitment'] ?? '{}', true, 32, JSON_THROW_ON_ERROR);
+                if (!is_array($values)) throw new RuntimeException('Saved product properties are invalid. Rename was cancelled.');
+                if (!array_key_exists($original, $values)) continue;
+                if (array_key_exists($key, $values)) throw new RuntimeException('A product already has a value under the new key. Choose a different key.');
+                $values[$key] = $values[$original]; unset($values[$original]);
+                $update->execute([json_encode((object) $values, JSON_THROW_ON_ERROR), $product['product_id']]);
+            }
+        }
+        $active = $original === '' ? 1 : (!empty($input['is_active']) ? 1 : 0);
+        $matching = !empty($input['affects_matching']) ? 1 : 0;
+        if ($original === '') {
+            $pdo->prepare('INSERT INTO Product_Property (property_key, label, is_active, affects_matching) VALUES (?, ?, ?, ?)')->execute([$key, trim($label), $active, $matching]);
+        } else {
+            $pdo->prepare('UPDATE Product_Property SET property_key = ?, label = ?, is_active = ?, affects_matching = ? WHERE property_key = ?')->execute([$key, trim($label), $active, $matching, $original]);
+        }
+        load_product_property_settings($pdo);
+        sync_feature_matches_for_catalog($pdo);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        load_product_property_settings($pdo);
+        throw $e;
+    }
 }
