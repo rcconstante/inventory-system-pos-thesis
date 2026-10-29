@@ -27,7 +27,7 @@ function ensure_revision_schema(PDO $pdo): void
                         }
                     }
                 }
-                $pdo->exec('ALTER TABLE Products ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP');
+                $pdo->exec('ALTER TABLE Products MODIFY COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP');
                 $pdo->prepare('INSERT IGNORE INTO Schema_Migration (migration_id) VALUES (?)')->execute([$marker]);
             }
         } finally {
