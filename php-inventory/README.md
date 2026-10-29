@@ -281,4 +281,4 @@ Inventory opens by stable product code: P001 through P220 for the source list, t
 - **Receipts:** Stable `SI-` invoice identifiers derived from the sale ID appear on POS and dashboard receipts.
 - **Upgrade:** New tables and columns are installed once automatically under a database lock. This revision does not change the existing catalog-reset version or reset products, stock, sales or accounts.
 
-Annotated screenshots and the walkthrough are in `../artifacts/revision-guide/index.html`. They use disposable test records, not live customer transactions.
+Annotated screenshots and the walkthrough are in `../output/pdf/revision-guide.pdf`. They use disposable test records, not live customer transactions.
