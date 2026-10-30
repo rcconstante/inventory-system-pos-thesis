@@ -603,16 +603,33 @@ function get_sellable_stock(PDO $pdo, int $productId): int
 
 function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleItemId): void
 {
+    if (!$pdo->inTransaction() || $quantity <= 0) {
+        throw new RuntimeException('Batch deductions require a transaction and a positive quantity.');
+    }
+    $item = $pdo->prepare('SELECT product_id, quantity FROM Sale_Item WHERE sale_item_id = ? FOR UPDATE');
+    $item->execute([$saleItemId]);
+    $saleItem = $item->fetch(PDO::FETCH_ASSOC);
+    if (!$saleItem || (int) $saleItem['product_id'] !== $productId || (int) $saleItem['quantity'] !== $quantity) {
+        throw new RuntimeException('Batch deduction must match the sold product and quantity.');
+    }
+    $allocated = $pdo->prepare('SELECT COUNT(*) FROM Sale_Item_Batch WHERE sale_item_id = ?');
+    $allocated->execute([$saleItemId]);
+    if ((int) $allocated->fetchColumn() > 0) throw new RuntimeException('Stock has already been deducted for this sale item.');
+
     $batchStatement = $pdo->prepare(
         "SELECT batch_id, quantity_remaining
          FROM Stock_Batch
          WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE'
+           AND quantity_remaining > 0
            AND (expiration_date IS NULL OR expiration_date >= CURDATE())
          ORDER BY date_received ASC, batch_id ASC
          FOR UPDATE"
     );
     $batchStatement->execute(['product_id' => $productId]);
     $batches = $batchStatement->fetchAll(PDO::FETCH_ASSOC);
+    if (array_sum(array_column($batches, 'quantity_remaining')) < $quantity) {
+        throw new RuntimeException('Insufficient non-expired batch stock for product ID ' . $productId);
+    }
 
     $remaining = $quantity;
     $saleItemBatchInsert = $pdo->prepare(

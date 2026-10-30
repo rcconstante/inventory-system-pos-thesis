@@ -284,3 +284,10 @@ Inventory opens by stable product code: P001 through P220 for the source list, t
 Annotated screenshots and the walkthrough are in `../output/pdf/revision-guide.pdf`. They use disposable test records, not live customer transactions.
 
 Inventory Print / Save PDF uses a full-height print layout with repeating table headers and no application scroll container. Verified with all 220 products across multiple PDF pages.
+
+
+### Batch rollover checks
+
+FIFO deductions require a positive quantity, an active transaction, a matching sale item, and no previous allocation for that sale item. Empty batches are skipped. Insufficient stock is rejected before batch quantities change. Regression checks cover batches of 5 and 4, sequential sales of 5 / 2 / 2, and a single sale spanning later batches of 3 and 2. Inventory totals and POS availability are checked after exhaustion of the first batch.
+
+Batch Management reads the sellable balance directly from batches. Empty active batches display DEPLETED. Each batch shows its recorded sales allocation count (before returns) and latest invoice number, to help investigate quantity discrepancies. These counts describe recorded allocations; they do not explain manual historical adjustments. Existing quantities are never restored automatically from received quantities, because that could undo legitimate sales.

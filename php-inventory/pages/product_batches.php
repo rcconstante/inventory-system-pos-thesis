@@ -43,7 +43,11 @@ if (!$product) {
     redirect_to('pages/products.php');
 }
 
+$product['current_stock'] = get_sellable_stock($pdo, $productId);
 $batches = fetch_batches_for_product($pdo, $productId);
+$allocations = $pdo->prepare('SELECT sib.batch_id, SUM(sib.quantity_from_batch) AS sold_units, MAX(si.sale_id) AS latest_sale FROM Sale_Item_Batch sib JOIN Sale_Item si ON si.sale_item_id = sib.sale_item_id WHERE si.product_id = ? GROUP BY sib.batch_id');
+$allocations->execute([$productId]);
+$batchSales = array_column($allocations->fetchAll(PDO::FETCH_ASSOC), null, 'batch_id');
 $batchDates = $pdo->prepare('SELECT batch_id, date_received, updated_at FROM Stock_Batch WHERE product_id = ?');
 $batchDates->execute([$productId]);
 $batchAudit = []; foreach ($batchDates->fetchAll() as $audit) $batchAudit[$audit['batch_id']] = $audit;
@@ -112,16 +116,17 @@ include '../includes/header.php';
                     <?php foreach ($batches as $batch): ?>
                         <?php
                         $batchStatus = (string) ($batch['status'] ?? 'ACTIVE');
-                        $statusClass = $batchStatus === 'ACTIVE' ? 'text-green-600' : ($batchStatus === 'EXPIRED' ? 'text-red-600' : 'text-gray-500');
+                        $depleted = $batchStatus === 'ACTIVE' && (int) $batch['quantity_remaining'] <= 0;
+                        $statusClass = $depleted ? 'text-gray-500' : ($batchStatus === 'ACTIVE' ? 'text-green-600' : ($batchStatus === 'EXPIRED' ? 'text-red-600' : 'text-gray-500'));
                         ?>
                         <tr class="border-b border-black dark:border-gray-600 last:border-b-0 dark:text-gray-100">
                             <td class="p-4 font-medium"><?php echo h($batch['batch_number']); ?><small class="block text-xs text-gray-500">Added: <?php echo h($batchAudit[$batch['batch_id']]['date_received'] ?? 'Not recorded'); ?><br>Edited: <?php echo h($batchAudit[$batch['batch_id']]['updated_at'] ?? 'Not edited'); ?></small></td>
-                            <td class="p-4 text-center"><?php echo h((string) $batch['quantity_received']); ?></td>
+                            <td class="p-4 text-center"><?php echo h((string) $batch['quantity_received']); ?><small class="block text-xs text-gray-500">Sales allocations: <?php echo (int) ($batchSales[$batch['batch_id']]['sold_units'] ?? 0); ?> (before returns)<?php if (isset($batchSales[$batch['batch_id']])): ?><br>Latest: <?php echo h(sales_invoice_number((int) $batchSales[$batch['batch_id']]['latest_sale'])); ?><?php endif; ?></small></td>
                             <td class="p-4 text-center"><?php echo h((string) $batch['quantity_remaining']); ?></td>
                             <td class="p-4 text-center"><?php echo h($batch['acquisition_cost'] !== null ? money_format_php((float) $batch['acquisition_cost']) : 'N/A'); ?></td>
                             <td class="p-4 text-center"><?php echo h($batch['manufacturing_date'] ?? 'N/A'); ?></td>
                             <td class="p-4 text-center"><?php echo h($batch['expiration_date'] ?? 'N/A'); ?></td>
-                            <td class="p-4 text-center font-semibold <?php echo $statusClass; ?>"><?php echo h($batchStatus); ?></td>
+                            <td class="p-4 text-center font-semibold <?php echo $statusClass; ?>"><?php echo h($depleted ? 'DEPLETED' : $batchStatus); ?></td>
                             <?php if ($canManage): ?>
                                 <td class="p-4 text-center">
                                     <div class="flex items-center justify-center gap-2">

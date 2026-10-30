@@ -401,6 +401,57 @@ try {
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Vehicle_Compatibility WHERE vehicle_id = ' . $archivedModelId)->fetchColumn() === 1, 'An archived product alone must protect its compatibility from deletion.');
     $optionRequest('vehicle', 'update', $archivedModelId, 'Archived Model Corrected');
     verify_http($pdo->query('SELECT compatibility FROM Products WHERE product_id = 1')->fetchColumn() === 'Archived Model Corrected', 'Compatibility renames must update archived products.');
+    $pdo->exec("INSERT INTO Products (product_name, price, category_id, product_type) VALUES ('FIFO rollover regression', 330, 1, 'Oil')");
+    $fifoProduct = (int) $pdo->lastInsertId();
+    $pdo->exec('INSERT INTO Inventory (product_id, current_stock) VALUES (' . $fifoProduct . ', 0)');
+    foreach ([5, 4] as $i => $quantity) {
+        [, $stockPage] = http_request($base, 'pages/stock_in.php', $cookies);
+        http_request($base, 'pages/stock_in.php', $cookies, ['csrf_token' => http_csrf($stockPage), 'product_id' => $fifoProduct, 'quantity' => $quantity, 'cost' => '220', 'batch_number' => 'FIFO-ROLLOVER-' . $i, 'manufacturing_date' => '', 'expiration_date' => '2099-01-01']);
+    }
+    foreach ([[5, [0, 4]], [2, [0, 2]], [2, [0, 0]]] as [$quantity, $expectedBatches]) {
+        [, $fifoPos] = http_request($base, 'pages/pos.php', $cookies);
+        $fifoToken = http_csrf($fifoPos);
+        http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $fifoToken, 'add_to_cart' => '1', 'product_id' => $fifoProduct, 'qty' => $quantity]);
+        http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $fifoToken, 'checkout' => '1', 'payment_method' => 'CASH']);
+        $remainingBatches = array_map('intval', $pdo->query('SELECT quantity_remaining FROM Stock_Batch WHERE product_id = ' . $fifoProduct . ' ORDER BY batch_id')->fetchAll(PDO::FETCH_COLUMN));
+        verify_http($remainingBatches === $expectedBatches, 'FIFO must consume exactly the sold quantity and preserve the next batch when the first is exhausted.');
+        verify_http((int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $fifoProduct)->fetchColumn() === array_sum($expectedBatches), 'Inventory must equal all remaining sellable batches after each checkout.');
+        if (array_sum($expectedBatches) > 0) {
+            [, $availablePos] = http_request($base, 'pages/pos.php?q=FIFO%20rollover%20regression', $cookies);
+            verify_http(str_contains($availablePos, 'name="product_id" value="' . $fifoProduct . '"'), 'Product must remain available in POS while another batch has sellable units.');
+        }
+
+    }
+    foreach ([3, 2] as $i => $quantity) {
+        [, $stockPage] = http_request($base, 'pages/stock_in.php', $cookies);
+        http_request($base, 'pages/stock_in.php', $cookies, ['csrf_token' => http_csrf($stockPage), 'product_id' => $fifoProduct, 'quantity' => $quantity, 'cost' => '220', 'batch_number' => 'FIFO-CROSS-' . $i, 'manufacturing_date' => '', 'expiration_date' => '2099-01-01']);
+    }
+    [, $fifoPos] = http_request($base, 'pages/pos.php', $cookies);
+    $fifoToken = http_csrf($fifoPos);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $fifoToken, 'add_to_cart' => '1', 'product_id' => $fifoProduct, 'qty' => '4']);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => $fifoToken, 'checkout' => '1', 'payment_method' => 'CASH']);
+    verify_http(array_map('intval', $pdo->query('SELECT quantity_remaining FROM Stock_Batch WHERE product_id = ' . $fifoProduct . ' ORDER BY batch_id')->fetchAll(PDO::FETCH_COLUMN)) === [0, 0, 0, 1], 'A single sale must span batches correctly, skip depleted batches and leave the exact balance.');
+    $lastFifoItem = (int) $pdo->query('SELECT MAX(sale_item_id) FROM Sale_Item WHERE product_id = ' . $fifoProduct)->fetchColumn();
+    $pdo->beginTransaction();
+    try {
+        deduct_stock_fifo($pdo, $fifoProduct, 4, $lastFifoItem);
+        verify_http(false, 'Repeated FIFO allocation must be blocked.');
+    } catch (RuntimeException $e) {
+        verify_http(str_contains($e->getMessage(), 'already'), 'Duplicate deduction must fail before changing any batch.');
+    } finally { $pdo->rollBack(); }
+    verify_http((int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $fifoProduct)->fetchColumn() === 1, 'Rejected duplicate must leave stock intact.');
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("INSERT INTO Sale (user_id, total_amount, payment_method, status) VALUES (1, 660, 'CASH', 'COMPLETED')");
+        $shortSale = (int) $pdo->lastInsertId();
+        $pdo->exec('INSERT INTO Sale_Item (sale_id, product_id, quantity, selling_price, subtotal) VALUES (' . $shortSale . ', ' . $fifoProduct . ', 2, 330, 660)');
+        $shortItem = (int) $pdo->lastInsertId();
+        try { deduct_stock_fifo($pdo, $fifoProduct, 2, $shortItem); verify_http(false, 'Insufficient FIFO deduction must fail.'); }
+        catch (RuntimeException $e) { verify_http(str_contains($e->getMessage(), 'Insufficient'), 'Insufficient FIFO deduction must fail before consuming the last unit.'); }
+        verify_http((int) $pdo->query('SELECT SUM(quantity_remaining) FROM Stock_Batch WHERE product_id = ' . $fifoProduct)->fetchColumn() === 1, 'Rejected insufficient sale must not alter any batch quantity.');
+    } finally { $pdo->rollBack(); }
+    [$fifoBatchStatus, $fifoBatchPage] = http_request($base, 'pages/product_batches.php?product_id=' . $fifoProduct, $cookies);
+    verify_http($fifoBatchStatus === 200 && str_contains($fifoBatchPage, 'DEPLETED') && str_contains($fifoBatchPage, 'Sales allocations:'), 'Batch screen must identify empty batches and expose their sales allocations.');
     [, $categoryPage] = http_request($base, 'pages/category.php', $cookies);
     http_request($base, 'pages/category.php', $cookies, ['csrf_token' => http_csrf($categoryPage), 'delete_category' => '1', 'category_id' => '1']);
     verify_http((int) $pdo->query('SELECT COUNT(*) FROM Feature_Based_Match')->fetchColumn() === 0, 'Category deletion must rebuild and clear invalid matches.');
