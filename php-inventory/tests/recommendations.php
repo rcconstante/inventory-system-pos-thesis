@@ -140,6 +140,10 @@ if ($dsn !== false && $dsn !== '') {
         sync_feature_matches_for_catalog($pdo);
         $results = fetch_recommendations_for_products($pdo, [1, 1, 11, 999999]);
         check(array_column($results[1], 'alternative_id') === [9, 8, 7, 10], 'Database results must follow eligibility and full ranking.');
+        $pdo->exec('UPDATE Stock_Batch SET is_depleted = 1 WHERE product_id = 9');
+        $staleFlagResults = fetch_recommendations_for_products($pdo, [1]);
+        check(array_column($staleFlagResults[1], 'alternative_id') === [9, 8, 7, 10], 'Stale depletion flags must not hide otherwise eligible stocked alternatives.');
+
         $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire' WHERE product_id = 1");
         $pdo->exec("UPDATE Products SET product_name = 'Dunlop Front Tire Plus' WHERE product_id = 7");
         check(find_pos_recommendation_sources($pdo, 'Dunlop Front Tire', 0) === [1], 'Exact out-of-stock product must be a recommendation source even when Plus is available.');

@@ -253,7 +253,7 @@ $productQuery = "
     LEFT JOIN Inventory i ON i.product_id = p.product_id
     INNER JOIN (
         SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
-        WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
+        WHERE status = 'ACTIVE' AND quantity_remaining > 0
             AND (expiration_date IS NULL OR expiration_date >= CURDATE())
         GROUP BY product_id
     ) stock ON stock.product_id = p.product_id

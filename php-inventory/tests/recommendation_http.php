@@ -450,6 +450,16 @@ try {
         catch (RuntimeException $e) { verify_http(str_contains($e->getMessage(), 'Insufficient'), 'Insufficient FIFO deduction must fail before consuming the last unit.'); }
         verify_http((int) $pdo->query('SELECT SUM(quantity_remaining) FROM Stock_Batch WHERE product_id = ' . $fifoProduct)->fetchColumn() === 1, 'Rejected insufficient sale must not alter any batch quantity.');
     } finally { $pdo->rollBack(); }
+    // Simulate a legacy inconsistency: positive ACTIVE stock marked depleted.
+    $pdo->exec('UPDATE Stock_Batch SET is_depleted = 1 WHERE product_id = ' . $fifoProduct . ' AND quantity_remaining > 0');
+    verify_http(get_sellable_stock($pdo, $fifoProduct) === 1, 'A stale depletion flag must not hide positive active unexpired stock.');
+    sync_inventory_from_batches($pdo, $fifoProduct);
+    verify_http((int) $pdo->query('SELECT current_stock FROM Inventory WHERE product_id = ' . $fifoProduct)->fetchColumn() === 1, 'Inventory sync must count positive stock even if its cached depletion flag is stale.');
+    [, $flagPos] = http_request($base, 'pages/pos.php?q=FIFO%20rollover%20regression', $cookies);
+    verify_http(str_contains($flagPos, 'name="product_id" value="' . $fifoProduct . '"'), 'POS must keep usable batches visible despite a stale depletion flag.');
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => http_csrf($flagPos), 'add_to_cart' => '1', 'product_id' => $fifoProduct, 'qty' => '1']);
+    http_request($base, 'pages/pos.php', $cookies, ['csrf_token' => http_csrf($flagPos), 'checkout' => '1', 'payment_method' => 'CASH']);
+    verify_http((int) $pdo->query('SELECT SUM(quantity_remaining) FROM Stock_Batch WHERE product_id = ' . $fifoProduct)->fetchColumn() === 0, 'FIFO must consume positive sellable stock with a stale flag and then mark it depleted correctly.');
     [$fifoBatchStatus, $fifoBatchPage] = http_request($base, 'pages/product_batches.php?product_id=' . $fifoProduct, $cookies);
     verify_http($fifoBatchStatus === 200 && str_contains($fifoBatchPage, 'DEPLETED') && str_contains($fifoBatchPage, 'Sales allocations:'), 'Batch screen must identify empty batches and expose their sales allocations.');
     [, $categoryPage] = http_request($base, 'pages/category.php', $cookies);

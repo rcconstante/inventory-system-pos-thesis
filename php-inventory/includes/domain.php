@@ -430,7 +430,7 @@ function fetch_model_recommendations(PDO $pdo, array $productIds, int $vehicleId
     $candidatesStatement = $pdo->prepare("SELECT p.*, stock.sellable_stock AS alternative_stock
         FROM Products p INNER JOIN (
             SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
-            WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
+            WHERE status = 'ACTIVE' AND quantity_remaining > 0
                 AND (expiration_date IS NULL OR expiration_date >= CURDATE())
             GROUP BY product_id
         ) stock ON stock.product_id = p.product_id
@@ -508,7 +508,7 @@ function fetch_recommendations_for_products(PDO $pdo, array $productIds, ?int $v
          INNER JOIN (
              SELECT product_id, SUM(quantity_remaining) AS sellable_stock
              FROM Stock_Batch
-             WHERE is_depleted = 0 AND status = 'ACTIVE'
+             WHERE status = 'ACTIVE'
                  AND quantity_remaining > 0
                  AND (expiration_date IS NULL OR expiration_date >= CURDATE())
              GROUP BY product_id
@@ -583,7 +583,7 @@ function create_stock_batch(PDO $pdo, int $productId, int $quantity, ?float $acq
 function sync_inventory_from_batches(PDO $pdo, int $productId): void
 {
     $statement = $pdo->prepare(
-        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE' AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
+        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND status = 'ACTIVE' AND quantity_remaining > 0 AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
     );
     $statement->execute(['product_id' => $productId]);
     $totalStock = (int) $statement->fetchColumn();
@@ -595,7 +595,7 @@ function sync_inventory_from_batches(PDO $pdo, int $productId): void
 function get_sellable_stock(PDO $pdo, int $productId): int
 {
     $statement = $pdo->prepare(
-        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE' AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
+        "SELECT COALESCE(SUM(quantity_remaining), 0) FROM Stock_Batch WHERE product_id = :product_id AND status = 'ACTIVE' AND quantity_remaining > 0 AND (expiration_date IS NULL OR expiration_date >= CURDATE())"
     );
     $statement->execute(['product_id' => $productId]);
     return (int) $statement->fetchColumn();
@@ -619,7 +619,7 @@ function deduct_stock_fifo(PDO $pdo, int $productId, int $quantity, int $saleIte
     $batchStatement = $pdo->prepare(
         "SELECT batch_id, quantity_remaining
          FROM Stock_Batch
-         WHERE product_id = :product_id AND is_depleted = 0 AND status = 'ACTIVE'
+         WHERE product_id = :product_id AND status = 'ACTIVE'
            AND quantity_remaining > 0
            AND (expiration_date IS NULL OR expiration_date >= CURDATE())
          ORDER BY date_received ASC, batch_id ASC

@@ -235,7 +235,7 @@ function find_pos_recommendation_sources(PDO $pdo, string $term, int $categoryId
     $statement = $pdo->prepare("SELECT p.product_id
         FROM Products p
         LEFT JOIN (SELECT product_id, SUM(quantity_remaining) AS sellable_stock FROM Stock_Batch
-            WHERE is_depleted = 0 AND status = 'ACTIVE' AND quantity_remaining > 0
+            WHERE status = 'ACTIVE' AND quantity_remaining > 0
             AND (expiration_date IS NULL OR expiration_date >= CURDATE()) GROUP BY product_id) stock ON stock.product_id = p.product_id
         WHERE COALESCE(p.product_status, 'ACTIVE') = 'ACTIVE'
         AND (? = 0 OR p.category_id = ?)
